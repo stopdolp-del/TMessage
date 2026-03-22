@@ -131,4 +131,4 @@ async function api(path, opts = {}) {
   return data;
 }
 
-export { api, getToken, setToken, getRefreshToken, setRefreshToken, BASE };
+export { api, getToken, setToken, getRefreshToken, setRefreshToken };
