@@ -619,31 +619,7 @@ $('#form-login')?.addEventListener('submit', async (e) => {
   }
 });
 
-$('#form-register')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  showError('register-error', '');
-  setFormLoading(form, true);
-  const fd = new FormData(form);
-  const username = String(fd.get('username') || '').trim();
-  const password = String(fd.get('password') || '');
-  try {
-    const res = await api('/register', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    setToken(res.token);
-    if (res.refreshToken) setRefreshToken(res.refreshToken);
-    await enterApp();
-  } catch (err) {
-    console.error('[TMessage] register', err);
-    showError('register-error', err.message || 'Registration failed');
-  } finally {
-    setFormLoading(form, false);
-  }
-});
-
-async function enterApp() {
+export async function enterApp() {
   await refreshMe();
   await loadSettings();
   showScreen('#main-screen');

@@ -23,13 +23,13 @@
             <button type="button" class="tab active" data-tab="login">Login</button>
             <button type="button" class="tab" data-tab="register">Register</button>
           </div>
-          <form id="form-login" class="auth-form">
+          <form id="form-login" class="auth-form" method="post" action="#">
             <label>Username <input type="text" name="username" required autocomplete="username" /></label>
             <label>Password <input type="password" name="password" required autocomplete="current-password" /></label>
             <button type="submit" class="btn primary">Sign in</button>
             <p id="auth-error" class="error"></p>
           </form>
-          <form id="form-register" class="auth-form hidden">
+          <form id="form-register" class="auth-form hidden" method="post" action="#">
             <label>Username <input type="text" name="username" minlength="2" required autocomplete="username" /></label>
             <label>Password <input type="password" name="password" minlength="8" required autocomplete="new-password" /></label>
             <button type="submit" class="btn primary">Create account</button>
