@@ -1,21 +1,36 @@
 /**
- * REST client: JWT + refresh. API base from same origin or window.__TMessing_API_ORIGIN__.
+ * REST: JWT + refresh. API host: same origin or window.__TMessage_API_ORIGIN__ (also accepts legacy __TMessing_API_ORIGIN__).
  */
 export function apiOrigin() {
   const raw =
-    typeof window !== 'undefined' && window.__TMessing_API_ORIGIN__ != null
-      ? String(window.__TMessing_API_ORIGIN__).trim()
+    typeof window !== 'undefined'
+      ? String(
+          window.__TMessage_API_ORIGIN__ ??
+            window.__TMessing_API_ORIGIN__ ??
+            ''
+        ).trim()
       : '';
   if (raw) return raw.replace(/\/$/, '');
   return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
-/** Absolute URL prefix for uploads and media (same host as API). */
 export function assetBase() {
   return apiOrigin();
 }
 
 export const BASE = () => `${apiOrigin()}/api`;
+
+/** Map API JSON + status to a single user-facing message. */
+export function formatApiError(status, data) {
+  if (data?.error) {
+    if (data.details) return `${data.error}: ${data.details}`;
+    return data.error;
+  }
+  if (status === 409) return 'User exists';
+  if (status === 400) return 'Invalid data';
+  if (status === 401) return 'Invalid credentials';
+  return 'Request failed';
+}
 
 function getToken() {
   return localStorage.getItem('tm_token');
@@ -52,10 +67,19 @@ async function tryRefresh() {
     }
     if (data.token) setToken(data.token);
     return true;
-  } catch {
+  } catch (e) {
+    console.error('[TMessage] refresh failed', e);
     return false;
   }
 }
+
+const NO_REFRESH_PATHS = new Set([
+  '/auth/refresh',
+  '/auth/login',
+  '/auth/register',
+  '/login',
+  '/register',
+]);
 
 async function api(path, opts = {}) {
   const headers = { ...opts.headers };
@@ -64,19 +88,31 @@ async function api(path, opts = {}) {
   if (opts.body && !(opts.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
-  let res = await fetch(`${BASE()}${path}`, { ...opts, headers });
-  if (
-    res.status === 401 &&
-    path !== '/auth/refresh' &&
-    path !== '/auth/login' &&
-    path !== '/login'
-  ) {
+
+  let res;
+  try {
+    res = await fetch(`${BASE()}${path}`, { ...opts, headers });
+  } catch (e) {
+    console.error('[TMessage] network', path, e);
+    const err = new Error('Network error — check API URL and connection');
+    err.status = 0;
+    err.data = {};
+    throw err;
+  }
+
+  if (res.status === 401 && !NO_REFRESH_PATHS.has(path)) {
     const ok = await tryRefresh();
     if (ok) {
       headers.Authorization = `Bearer ${getToken()}`;
-      res = await fetch(`${BASE()}${path}`, { ...opts, headers });
+      try {
+        res = await fetch(`${BASE()}${path}`, { ...opts, headers });
+      } catch (e) {
+        console.error('[TMessage] network retry', path, e);
+        throw e;
+      }
     }
   }
+
   const text = await res.text();
   let data;
   try {
@@ -85,9 +121,11 @@ async function api(path, opts = {}) {
     data = { raw: text };
   }
   if (!res.ok) {
-    const err = new Error(data.error || res.statusText || 'Request failed');
+    const msg = formatApiError(res.status, data);
+    const err = new Error(msg);
     err.status = res.status;
     err.data = data;
+    console.warn('[TMessage] API', path, res.status, data);
     throw err;
   }
   return data;

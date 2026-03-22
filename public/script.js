@@ -1,6 +1,14 @@
 /**
- * Web app entry. Loads the TMessing client from /public/js/.
- * Optional: window.__TMessing_API_ORIGIN__ = 'https://your-api.onrender.com' (no trailing slash)
- * when this HTML is served from a different host than the API.
+ * TMessage web entry. Optional: window.__TMessage_API_ORIGIN__ = 'https://your-app.onrender.com'
  */
-import './js/app.js';
+(async () => {
+  try {
+    await import('./js/app.js');
+  } catch (e) {
+    console.error('[TMessage] failed to load app', e);
+    const m = document.createElement('p');
+    m.style.cssText = 'padding:24px;font-family:system-ui,sans-serif;color:#c00';
+    m.textContent = 'TMessage could not start. Open the developer console for details.';
+    document.body?.appendChild(m);
+  }
+})();

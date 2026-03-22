@@ -1,8 +1,8 @@
 {
-  "name": "tmessing",
-  "productName": "TMessing",
+  "name": "tmessage",
+  "productName": "TMessage",
   "version": "1.0.0",
-  "description": "TMessing — desktop messaging (Electron + Node + WebSocket + SQLite)",
+  "description": "TMessage — web messaging (Node + WebSocket + SQLite)",
   "main": "app/main.js",
   "author": "",
   "license": "MIT",

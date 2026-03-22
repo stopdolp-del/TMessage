@@ -28,6 +28,9 @@ export function connectSocket(handlers) {
     }
     if (handlers.onEvent) handlers.onEvent(data);
   });
+  ws.addEventListener('error', (ev) => {
+    console.error('[TMessage] WebSocket error', ev);
+  });
   ws.addEventListener('close', () => {
     if (handlers.onClose) handlers.onClose();
   });

@@ -29,12 +29,29 @@ let settings = { notify_sound: 1, notify_desktop: 1, theme: 'dark' };
 let mediaRecorder = null;
 let receiptReloadTimer;
 let chatListRenderTimer;
+const deliveredPending = new Set();
+let deliveredFlushTimer = null;
 
 function scheduleReceiptReload() {
   clearTimeout(receiptReloadTimer);
   receiptReloadTimer = setTimeout(() => {
     if (activeChatId) loadMessages(activeChatId).catch(() => {});
-  }, 200);
+  }, 350);
+}
+
+function queueDeliveredAck(messageId) {
+  if (!messageId || !me) return;
+  deliveredPending.add(messageId);
+  clearTimeout(deliveredFlushTimer);
+  deliveredFlushTimer = setTimeout(flushDeliveredAcks, 160);
+}
+
+function flushDeliveredAcks() {
+  deliveredFlushTimer = null;
+  const ids = [...deliveredPending];
+  deliveredPending.clear();
+  if (!ids.length) return;
+  void Promise.all(ids.map((id) => api(`/messages/delivered/${id}`, { method: 'POST' }).catch(() => {})));
 }
 
 function scheduleChatListRender() {
@@ -56,6 +73,14 @@ function showScreen(id) {
 function showError(id, msg) {
   const el = $(id);
   if (el) el.textContent = msg || '';
+}
+
+function setFormLoading(form, loading) {
+  const btn = form?.querySelector?.('button[type="submit"]');
+  if (btn) {
+    btn.disabled = !!loading;
+    btn.classList.toggle('is-loading', !!loading);
+  }
 }
 
 function playBeep() {
@@ -229,9 +254,7 @@ async function loadMessages(chatId, before = null) {
   $('#btn-load-more')?.classList.toggle('hidden', messages.length < 40);
   renderMessages(chatId);
   messages.forEach((m) => {
-    if (m.sender_id !== me?.id) {
-      api(`/messages/delivered/${m.id}`, { method: 'POST' }).catch(() => {});
-    }
+    if (m.sender_id !== me?.id) queueDeliveredAck(m.id);
   });
 }
 
@@ -327,6 +350,17 @@ function buildMessageElement(m) {
   return div;
 }
 
+function refreshMessageDom(messageId) {
+  const box = $('#messages');
+  if (!box || !activeChatId) return;
+  const list = messagesByChat[activeChatId] || [];
+  const msg = list.find((m) => m.id === messageId);
+  if (!msg) return;
+  const el = box.querySelector(`.msg[data-id="${messageId}"]`);
+  if (!el) return;
+  el.replaceWith(buildMessageElement(msg));
+}
+
 function renderMessages(chatId) {
   const box = $('#messages');
   if (!box) return;
@@ -341,19 +375,25 @@ function renderMessages(chatId) {
 async function toggleReaction(messageId, emoji) {
   const list = messagesByChat[activeChatId] || [];
   const msg = list.find((x) => x.id === messageId);
-  const mine = msg?.reactions?.find((r) => r.userId === me.id);
+  if (!msg || !me) return;
+  const mine = msg.reactions?.find((r) => r.userId === me.id);
+  const prev = msg.reactions ? msg.reactions.map((r) => ({ ...r })) : [];
   try {
     if (mine?.emoji === emoji) {
       await api(`/messages/message/${messageId}/react`, { method: 'DELETE' });
+      msg.reactions = (msg.reactions || []).filter((r) => r.userId !== me.id);
     } else {
       await api(`/messages/message/${messageId}/react`, {
         method: 'POST',
         body: JSON.stringify({ emoji }),
       });
+      msg.reactions = [...(msg.reactions || []).filter((r) => r.userId !== me.id), { userId: me.id, emoji }];
     }
-    if (activeChatId) await loadMessages(activeChatId);
-  } catch {
-    /* ignore */
+    refreshMessageDom(messageId);
+  } catch (e) {
+    msg.reactions = prev;
+    refreshMessageDom(messageId);
+    console.warn('[TMessage] reaction', e);
   }
 }
 
@@ -386,10 +426,10 @@ function appendMessage(chatId, m) {
   if (document.hidden && settings.notify_desktop) {
     const body = `${m.username}: ${m.body || m.file_name || ''}`;
     if (window.tmessing?.showNotification) {
-      window.tmessing.showNotification('TMessing', body);
+      window.tmessing.showNotification('TMessage', body);
     } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
-        new Notification('TMessing', { body });
+        new Notification('TMessage', { body });
       } catch {
         /* ignore */
       }
@@ -397,7 +437,7 @@ function appendMessage(chatId, m) {
   }
   if (settings.notify_sound && chatId !== activeChatId) playBeep();
   if (m.sender_id !== me?.id && chatId === activeChatId) {
-    api(`/messages/delivered/${m.id}`, { method: 'POST' }).catch(() => {});
+    queueDeliveredAck(m.id);
   }
 }
 
@@ -557,38 +597,49 @@ document.querySelectorAll('.tab').forEach((tab) => {
 
 $('#form-login')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const form = e.target;
   showError('auth-error', '');
-  const fd = new FormData(e.target);
+  setFormLoading(form, true);
+  const fd = new FormData(form);
+  const username = String(fd.get('username') || '').trim();
+  const password = String(fd.get('password') || '');
   try {
-    const res = await api('/auth/login', {
+    const res = await api('/login', {
       method: 'POST',
-      body: JSON.stringify({ username: fd.get('username'), password: fd.get('password') }),
+      body: JSON.stringify({ username, password }),
     });
     setToken(res.token);
     if (res.refreshToken) setRefreshToken(res.refreshToken);
     await enterApp();
   } catch (err) {
-    showError('auth-error', err.data?.error || err.message);
+    console.error('[TMessage] login', err);
+    showError('auth-error', err.message || 'Invalid credentials');
+  } finally {
+    setFormLoading(form, false);
   }
 });
 
 $('#form-register')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const form = e.target;
   showError('register-error', '');
-  const fd = new FormData(e.target);
+  setFormLoading(form, true);
+  const fd = new FormData(form);
+  const username = String(fd.get('username') || '').trim();
+  const password = String(fd.get('password') || '');
   try {
-    const res = await api('/auth/register', {
+    const res = await api('/register', {
       method: 'POST',
-      body: JSON.stringify({
-        username: fd.get('username'),
-        password: fd.get('password'),
-      }),
+      body: JSON.stringify({ username, password }),
     });
     setToken(res.token);
     if (res.refreshToken) setRefreshToken(res.refreshToken);
     await enterApp();
   } catch (err) {
-    showError('register-error', err.data?.error || err.message);
+    console.error('[TMessage] register', err);
+    showError('register-error', err.message || 'Registration failed');
+  } finally {
+    setFormLoading(form, false);
   }
 });
 
@@ -1100,16 +1151,21 @@ function debounce(fn, ms) {
 
 // Boot
 (async () => {
-  applyTheme(localStorage.getItem('tm_theme') || 'dark');
-  if (getToken()) {
-    try {
-      await enterApp();
-    } catch {
-      setToken(null);
-      setRefreshToken(null);
+  try {
+    applyTheme(localStorage.getItem('tm_theme') || 'dark');
+    if (getToken()) {
+      try {
+        await enterApp();
+      } catch (e) {
+        console.error('[TMessage] enterApp', e);
+        setToken(null);
+        setRefreshToken(null);
+        showScreen('#auth-screen');
+      }
+    } else {
       showScreen('#auth-screen');
     }
-  } else {
-    showScreen('#auth-screen');
+  } catch (e) {
+    console.error('[TMessage] boot', e);
   }
 })();

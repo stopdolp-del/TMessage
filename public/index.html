@@ -4,21 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0f0f0f" />
-    <title>TMessing</title>
+    <title>TMessage</title>
     <link rel="stylesheet" href="style.css" />
-    <!-- Optional: set before script.js when UI is on another domain than the API (no trailing slash)
-    <script>window.__TMessing_API_ORIGIN__ = 'https://your-app.onrender.com';</script>
+    <!-- Optional: when UI is not on the same host as the API (no trailing slash):
+    <script>window.__TMessage_API_ORIGIN__ = 'https://your-app.onrender.com';</script>
     -->
     <script>
-      window.__TMessing_API_ORIGIN__ = window.__TMessing_API_ORIGIN__ || '';
+      window.__TMessage_API_ORIGIN__ = window.__TMessage_API_ORIGIN__ || window.__TMessing_API_ORIGIN__ || '';
     </script>
   </head>
   <body>
     <div id="app">
       <section id="auth-screen" class="screen">
         <div class="auth-card">
-          <h1>TMessing</h1>
-          <p class="muted">Web messenger</p>
+          <h1>TMessage</h1>
+          <p class="muted">Sign in to chat</p>
           <div class="tabs">
             <button type="button" class="tab active" data-tab="login">Login</button>
             <button type="button" class="tab" data-tab="register">Register</button>
@@ -34,7 +34,7 @@
             <label>Password <input type="password" name="password" minlength="8" required autocomplete="new-password" /></label>
             <button type="submit" class="btn primary">Create account</button>
             <p id="register-error" class="error"></p>
-            <p class="hint muted small">Same server as API — use <code>__TMessing_API_ORIGIN__</code> if hosted separately.</p>
+            <p class="hint muted small">Use <code>__TMessage_API_ORIGIN__</code> if the API is on another host.</p>
           </form>
         </div>
       </section>
@@ -43,7 +43,7 @@
         <header class="top-bar">
           <div class="top-bar-left">
             <div class="top-brand">
-              <span class="logo">TMessing</span>
+              <span class="logo">TMessage</span>
               <span id="top-user" class="top-user" title="Signed in as"></span>
             </div>
           </div>

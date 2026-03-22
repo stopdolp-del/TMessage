@@ -403,6 +403,9 @@ body {
   flex-direction: column;
   gap: 8px;
   scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .msg {
@@ -537,6 +540,7 @@ body {
   font-family: inherit;
   font-size: 0.9375rem;
   line-height: 1.4;
+  touch-action: manipulation;
 }
 
 .composer textarea:focus {
@@ -590,6 +594,11 @@ body {
 
 .btn:active {
   transform: scale(0.98);
+}
+
+.btn.is-loading {
+  opacity: 0.65;
+  pointer-events: none;
 }
 
 .btn.primary {

@@ -1,12 +1,12 @@
 /**
- * TMessing API + static UI + WebSocket entry point.
+ * TMessage API + static web UI + WebSocket.
  */
 /* eslint-disable no-console */
 process.on('unhandledRejection', (reason) => {
-  console.error('[TMessing] unhandledRejection', reason);
+  console.error('[TMessage] unhandledRejection', reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[TMessing] uncaughtException', err);
+  console.error('[TMessage] uncaughtException', err);
 });
 
 const http = require('http');
@@ -57,7 +57,6 @@ app.use('/api/login', authLimiter);
 app.use('/api/register', authLimiter);
 
 const publicPath = path.join(config.root, 'public');
-app.use(express.static(publicPath));
 app.use('/uploads', express.static(config.uploadsPath));
 
 app.get('/health', (req, res) => res.json({ ok: true, port: config.port }));
@@ -72,6 +71,8 @@ app.use('/api/search', searchRoutes);
 /** Same handlers as /api/auth/* (clients may use /api/register and /api/login). */
 app.use('/api', authRoutes);
 
+app.use(express.static(publicPath));
+
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(publicPath, 'index.html'));
@@ -79,7 +80,7 @@ app.get('*', (req, res, next) => {
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  console.error('[TMessing] API error', err.message || err);
+  console.error('[TMessage] API error', err.message || err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
@@ -130,7 +131,7 @@ async function start() {
           }
         }
 
-        console.log(`TMessing server http://127.0.0.1:${listenPort}`);
+        console.log(`TMessage server listening on port ${listenPort}`);
         return { server, port: listenPort };
       } catch (e) {
         startPromise = null;
