@@ -56,8 +56,8 @@ app.use('/api/auth/refresh', authLimiter);
 app.use('/api/login', authLimiter);
 app.use('/api/register', authLimiter);
 
-const rendererPath = path.join(config.root, 'app', 'renderer');
-app.use(express.static(rendererPath));
+const publicPath = path.join(config.root, 'public');
+app.use(express.static(publicPath));
 app.use('/uploads', express.static(config.uploadsPath));
 
 app.get('/health', (req, res) => res.json({ ok: true, port: config.port }));
@@ -74,7 +74,7 @@ app.use('/api', authRoutes);
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(rendererPath, 'index.html'));
+  res.sendFile(path.join(publicPath, 'index.html'));
 });
 
 app.use((err, req, res, next) => {
