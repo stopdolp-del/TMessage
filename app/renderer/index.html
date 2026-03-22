@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TMessing</title>
+    <link rel="stylesheet" href="styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <section id="auth-screen" class="screen">
+        <div class="auth-card">
+          <h1>TMessing</h1>
+          <p class="muted">Telegram-style messenger</p>
+          <div class="tabs">
+            <button type="button" class="tab active" data-tab="login">Login</button>
+            <button type="button" class="tab" data-tab="register">Register</button>
+          </div>
+          <form id="form-login" class="auth-form">
+            <label>Username <input type="text" name="username" required autocomplete="username" /></label>
+            <label>Password <input type="password" name="password" required autocomplete="current-password" /></label>
+            <button type="submit" class="btn primary">Sign in</button>
+            <p id="auth-error" class="error"></p>
+          </form>
+          <form id="form-register" class="auth-form hidden">
+            <label>Username <input type="text" name="username" minlength="2" required autocomplete="username" /></label>
+            <label>Password <input type="password" name="password" minlength="8" required autocomplete="new-password" /></label>
+            <button type="submit" class="btn primary">Create account</button>
+            <p id="register-error" class="error"></p>
+            <p class="hint muted small">Default admin username: <strong>stopdolp</strong> (set <code>ADMIN_USERNAME</code> in <code>.env</code>)</p>
+          </form>
+        </div>
+      </section>
+
+      <section id="main-screen" class="screen hidden">
+        <header class="top-bar">
+          <div class="top-bar-left">
+            <div class="top-brand">
+              <span class="logo">TMessing</span>
+              <span id="top-user" class="top-user" title="Signed in as"></span>
+            </div>
+          </div>
+          <div class="global-search-wrap">
+            <input type="search" id="global-search" placeholder="Search users & messages…" />
+            <div id="global-search-results" class="global-search-results hidden"></div>
+          </div>
+          <div class="top-actions">
+            <button type="button" id="btn-theme" class="btn ghost" title="Theme">◐</button>
+            <button type="button" id="btn-new-chat" class="btn ghost" title="New chat">＋</button>
+            <button type="button" id="btn-admin" class="btn ghost hidden" title="Admin">⚙</button>
+            <button type="button" id="btn-settings" class="btn ghost" title="Settings">⚡</button>
+            <button type="button" id="btn-profile" class="btn ghost" title="Profile">👤</button>
+            <button type="button" id="btn-logout" class="btn ghost">Logout</button>
+          </div>
+        </header>
+        <div class="layout">
+          <aside class="sidebar">
+            <div class="search-wrap">
+              <input type="search" id="chat-search" placeholder="Filter chats…" />
+            </div>
+            <ul id="chat-list" class="chat-list"></ul>
+          </aside>
+          <main class="chat-main">
+            <div id="chat-placeholder" class="placeholder">
+              <p>Select a chat or start a new conversation</p>
+            </div>
+            <div id="chat-panel" class="chat-panel hidden">
+              <div class="chat-header">
+                <div class="chat-header-main">
+                  <div class="chat-title-wrap">
+                    <h2 id="chat-title">—</h2>
+                    <span id="chat-sub" class="chat-status muted small"></span>
+                  </div>
+                </div>
+                <div class="chat-header-actions">
+                  <button type="button" id="btn-voice" class="btn btn-call" title="Voice call">📞</button>
+                  <button type="button" id="btn-video" class="btn btn-call" title="Video call">🎥</button>
+                </div>
+              </div>
+              <div id="reply-preview" class="reply-preview hidden">
+                <span id="reply-preview-text"></span>
+                <button type="button" id="reply-cancel" class="btn ghost tiny">✕</button>
+              </div>
+              <button type="button" id="btn-load-more" class="btn ghost load-more hidden">Load older messages</button>
+              <div id="messages" class="messages"></div>
+              <div id="typing-bar" class="typing-bar hidden"><span id="typing-text"></span></div>
+              <div id="call-overlay" class="call-overlay hidden">
+                <p id="call-status" class="call-status" aria-live="polite"></p>
+                <video id="remote-video" playsinline autoplay muted class="remote-video"></video>
+                <audio id="remote-audio" autoplay></audio>
+                <button type="button" id="btn-end-call" class="btn danger">End call</button>
+              </div>
+              <form id="composer" class="composer">
+                <label class="attach-btn" title="Attach">
+                  <input type="file" id="file-input" hidden multiple />
+                  📎
+                </label>
+                <button type="button" id="btn-emoji" class="btn ghost composer-tool" title="Emoji">😀</button>
+                <button type="button" id="btn-record" class="btn ghost composer-tool" title="Voice message">🎤</button>
+                <div id="emoji-pop" class="emoji-pop hidden"></div>
+                <div class="composer-input-shell">
+                  <textarea id="msg-input" rows="1" placeholder="Write a message…"></textarea>
+                </div>
+                <button type="submit" class="btn primary composer-send" title="Send">Send</button>
+              </form>
+            </div>
+          </main>
+        </div>
+      </section>
+
+      <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal" id="modal-new">
+          <h3>New conversation</h3>
+          <input type="search" id="user-search" placeholder="Search users…" />
+          <ul id="user-results" class="user-results"></ul>
+          <div class="modal-section">
+            <h4>Group / channel</h4>
+            <label>Type
+              <select id="gc-type">
+                <option value="group">Group</option>
+                <option value="channel">Channel</option>
+              </select>
+            </label>
+            <label>Name <input type="text" id="gc-name" /></label>
+            <button type="button" id="btn-create-gc" class="btn primary">Create</button>
+          </div>
+          <button type="button" class="btn ghost modal-close">Close</button>
+        </div>
+        <div class="modal hidden" id="modal-profile">
+          <h3>Profile</h3>
+          <form id="form-profile">
+            <div class="avatar-row">
+              <img id="profile-avatar" src="" alt="" class="avatar-lg" />
+              <label class="btn ghost"><input type="file" id="profile-avatar-input" accept="image/*" hidden /> Avatar</label>
+            </div>
+            <label>Username <input type="text" name="username" /></label>
+            <label>Bio <textarea name="bio" rows="3"></textarea></label>
+            <label>Status <input type="text" name="status_text" maxlength="140" placeholder="Short status" /></label>
+            <button type="submit" class="btn primary">Save</button>
+          </form>
+          <div class="modal-section">
+            <h4>Change password</h4>
+            <form id="form-password">
+              <label>Current <input type="password" name="currentPassword" required /></label>
+              <label>New <input type="password" name="newPassword" minlength="8" required /></label>
+              <button type="submit" class="btn primary">Update password</button>
+            </form>
+          </div>
+          <button type="button" class="btn ghost modal-close">Close</button>
+        </div>
+        <div class="modal hidden" id="modal-settings">
+          <h3>Settings</h3>
+          <form id="form-settings">
+            <label><input type="checkbox" id="set-notify-desktop" /> Desktop notifications</label>
+            <label><input type="checkbox" id="set-notify-sound" /> Sound alerts</label>
+            <label><input type="checkbox" id="set-privacy-seen" /> Show my last seen</label>
+            <button type="submit" class="btn primary">Save</button>
+          </form>
+          <button type="button" class="btn ghost modal-close">Close</button>
+        </div>
+        <div class="modal hidden" id="modal-admin">
+          <h3>Admin</h3>
+          <p class="muted small">Ban user ID, delete message ID, delete chat ID.</p>
+          <label>Ban user ID <input type="number" id="admin-ban-id" /></label>
+          <button type="button" id="admin-ban" class="btn danger">Ban</button>
+          <button type="button" id="admin-unban" class="btn ghost">Unban</button>
+          <label>Delete message ID <input type="number" id="admin-msg-id" /></label>
+          <button type="button" id="admin-del-msg" class="btn danger">Delete message</button>
+          <label>Delete chat ID <input type="number" id="admin-chat-id" /></label>
+          <button type="button" id="admin-del-chat" class="btn danger">Delete chat</button>
+          <button type="button" class="btn ghost modal-close">Close</button>
+        </div>
+      </div>
+      <div id="incoming-call-sheet" class="incoming-call-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="incoming-call-title">
+        <div class="incoming-call-card">
+          <p id="incoming-call-title" class="incoming-call-title">Incoming call</p>
+          <p id="incoming-call-sub" class="muted incoming-call-sub"></p>
+          <div class="incoming-call-actions">
+            <button type="button" id="btn-call-decline" class="btn danger">Decline</button>
+            <button type="button" id="btn-call-accept" class="btn primary">Accept</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
