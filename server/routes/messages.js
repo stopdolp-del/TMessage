@@ -102,6 +102,8 @@ router.post(
     let filePath = null;
     let fileMime = null;
     let fileSize = null;
+    const videoNote =
+      req.body.video_note === '1' || req.body.video_note === 'true' || req.body.video_note === true ? 1 : 0;
 
     if (req.file) {
       fileName = req.file.originalname;
@@ -116,10 +118,10 @@ router.post(
 
     const info = db
       .prepare(
-        `INSERT INTO messages (chat_id, sender_id, body, msg_type, file_name, file_path, file_mime, file_size, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO messages (chat_id, sender_id, body, msg_type, file_name, file_path, file_mime, file_size, reply_to_id, video_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(chatId, req.user.id, body, msgType, fileName, filePath, fileMime, fileSize, replyToId);
+      .run(chatId, req.user.id, body, msgType, fileName, filePath, fileMime, fileSize, replyToId, videoNote);
 
     const mid = info.lastInsertRowid;
     seedReceiptsForNewMessage(mid, chatId, req.user.id);

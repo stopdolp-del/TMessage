@@ -15,9 +15,14 @@ const {
   revokeAllUserSessions,
   validateRefreshToken,
 } = require('../services/sessions');
+const { createCaptcha, validateCaptcha } = require('../services/captchaStore');
 
 const router = express.Router();
 const SALT = 12;
+
+router.get('/register/captcha', (req, res) => {
+  res.json(createCaptcha());
+});
 
 /** Stable unique internal email (avoids UNIQUE collisions for similar usernames). */
 function placeholderEmail(username) {
@@ -34,6 +39,8 @@ router.post(
       .matches(/^[\p{L}\p{N}_.-]+$/u)
       .withMessage('Username: 2–32 chars, letters, numbers, _ . -'),
     body('password').isLength({ min: 8, max: 128 }).withMessage('Password: at least 8 characters'),
+    body('captchaId').notEmpty().withMessage('Captcha required'),
+    body('captchaAnswer').notEmpty().withMessage('Answer the captcha'),
   ],
   async (req, res, next) => {
     try {
@@ -45,7 +52,13 @@ router.post(
           details: first.msg,
         });
       }
-      const { username, password } = req.body;
+      const { username, password, captchaId, captchaAnswer } = req.body;
+      if (!validateCaptcha(captchaId, captchaAnswer)) {
+        return res.status(400).json({
+          error: 'Invalid captcha',
+          details: 'Wrong answer or expired. Request a new question.',
+        });
+      }
       const db = getDb();
       const uname = username.trim();
       const exists = db.prepare('SELECT id FROM users WHERE lower(username) = ?').get(uname.toLowerCase());

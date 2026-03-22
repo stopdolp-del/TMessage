@@ -88,6 +88,17 @@ router.post('/me/avatar', authMiddleware, (req, res) => {
 });
 
 router.get('/search', authMiddleware, (req, res) => {
+  const username = (req.query.username ?? '').toString().trim();
+  if (username.length > 0) {
+    const db = getDb();
+    const u = db
+      .prepare(
+        `SELECT id, username, avatar_url, is_admin FROM users
+         WHERE is_banned = 0 AND lower(username) = lower(?) AND id != ?`
+      )
+      .get(username, req.user.id);
+    return res.json({ user: u || null });
+  }
   const q = (req.query.q || '').toString().trim();
   if (q.length < 2) return res.json({ users: [] });
   const db = getDb();

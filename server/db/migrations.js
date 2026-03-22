@@ -91,6 +91,12 @@ function runMigrations(db) {
     // No email verification: all accounts can use the app immediately.
     db.run('UPDATE users SET is_verified = 1');
     db.run('INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)');
+    v = 4;
+  }
+
+  if (v < 5) {
+    safeAlter(db, 'ALTER TABLE messages ADD COLUMN video_note INTEGER DEFAULT 0');
+    db.run('INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)');
   }
 }
 

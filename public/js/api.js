@@ -1,6 +1,8 @@
 /**
  * REST: JWT + refresh. API host: same origin or window.__TMessage_API_ORIGIN__ (also accepts legacy __TMessing_API_ORIGIN__).
  */
+const DEFAULT_API = 'https://tmessage.onrender.com';
+
 export function apiOrigin() {
   const raw =
     typeof window !== 'undefined'
@@ -11,7 +13,7 @@ export function apiOrigin() {
         ).trim()
       : '';
   if (raw) return raw.replace(/\/$/, '');
-  return typeof window !== 'undefined' ? window.location.origin : '';
+  return DEFAULT_API;
 }
 
 export function assetBase() {

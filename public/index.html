@@ -6,11 +6,10 @@
     <meta name="theme-color" content="#0f0f0f" />
     <title>TMessage</title>
     <link rel="stylesheet" href="style.css" />
-    <!-- Optional: when UI is not on the same host as the API (no trailing slash):
-    <script>window.__TMessage_API_ORIGIN__ = 'https://your-app.onrender.com';</script>
-    -->
+    <!-- Optional TURN: window.__TMessage_TURN__ = [{ urls:'turn:…', username:'…', credential:'…' }]; -->
     <script>
-      window.__TMessage_API_ORIGIN__ = window.__TMessage_API_ORIGIN__ || window.__TMessing_API_ORIGIN__ || '';
+      window.__TMessage_API_ORIGIN__ =
+        window.__TMessage_API_ORIGIN__ || window.__TMessing_API_ORIGIN__ || 'https://tmessage.onrender.com';
     </script>
   </head>
   <body>
@@ -32,9 +31,14 @@
           <form id="form-register" class="auth-form hidden" method="post" action="#">
             <label>Username <input type="text" name="username" minlength="2" required autocomplete="username" /></label>
             <label>Password <input type="password" name="password" minlength="8" required autocomplete="new-password" /></label>
+            <input type="hidden" name="captchaId" id="register-captcha-id" value="" />
+            <label class="captcha-block">
+              <span id="register-captcha-q" class="captcha-q">Loading security check…</span>
+              <input type="text" name="captchaAnswer" id="register-captcha-answer" inputmode="numeric" autocomplete="off" placeholder="Your answer" required />
+            </label>
+            <button type="button" id="btn-captcha-refresh" class="btn ghost small">New question</button>
             <button type="submit" class="btn primary">Create account</button>
             <p id="register-error" class="error"></p>
-            <p class="hint muted small">Use <code>__TMessage_API_ORIGIN__</code> if the API is on another host.</p>
           </form>
         </div>
       </section>
@@ -42,6 +46,7 @@
       <section id="main-screen" class="screen hidden">
         <header class="top-bar">
           <div class="top-bar-left">
+            <button type="button" id="btn-back-chats" class="btn ghost btn-back-chats" aria-label="Back to chats">←</button>
             <div class="top-brand">
               <span class="logo">TMessage</span>
               <span id="top-user" class="top-user" title="Signed in as"></span>
@@ -60,7 +65,7 @@
             <button type="button" id="btn-logout" class="btn ghost">Logout</button>
           </div>
         </header>
-        <div class="layout">
+        <div class="layout" id="main-layout">
           <aside class="sidebar">
             <div class="search-wrap">
               <input type="search" id="chat-search" placeholder="Filter chats…" />
@@ -93,9 +98,17 @@
               <div id="typing-bar" class="typing-bar hidden"><span id="typing-text"></span></div>
               <div id="call-overlay" class="call-overlay hidden">
                 <p id="call-status" class="call-status" aria-live="polite"></p>
-                <video id="remote-video" playsinline autoplay muted class="remote-video"></video>
+                <div class="call-video-grid">
+                  <video id="remote-video" playsinline autoplay class="remote-video"></video>
+                  <video id="local-video" playsinline autoplay muted class="local-video" hidden></video>
+                </div>
                 <audio id="remote-audio" autoplay></audio>
-                <button type="button" id="btn-end-call" class="btn danger">End call</button>
+                <div class="call-toolbar">
+                  <button type="button" id="btn-call-mute" class="btn btn-call-tool" title="Mute mic">🎤</button>
+                  <button type="button" id="btn-call-cam" class="btn btn-call-tool hidden" title="Camera">📷</button>
+                  <button type="button" id="btn-call-flip" class="btn btn-call-tool hidden" title="Flip camera">🔄</button>
+                </div>
+                <button type="button" id="btn-end-call" class="btn danger btn-end-call" title="End call">❌</button>
               </div>
               <form id="composer" class="composer">
                 <label class="attach-btn" title="Attach">
@@ -103,7 +116,7 @@
                   📎
                 </label>
                 <button type="button" id="btn-emoji" class="btn ghost composer-tool" title="Emoji">😀</button>
-                <button type="button" id="btn-record" class="btn ghost composer-tool" title="Voice message">🎤</button>
+                <button type="button" id="btn-record" class="btn ghost composer-tool" title="Tap: voice · Hold: video note">🎤</button>
                 <div id="emoji-pop" class="emoji-pop hidden"></div>
                 <div class="composer-input-shell">
                   <textarea id="msg-input" rows="1" placeholder="Write a message…"></textarea>
@@ -115,9 +128,40 @@
         </div>
       </section>
 
+      <div id="video-note-overlay" class="video-note-overlay hidden" aria-hidden="true">
+        <div class="video-note-ring">
+          <video id="video-note-preview" class="video-note-preview" playsinline muted></video>
+          <svg class="video-note-svg" viewBox="0 0 100 100">
+            <circle class="video-note-track" cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4" />
+            <circle
+              id="video-note-progress"
+              class="video-note-prog"
+              cx="50"
+              cy="50"
+              r="46"
+              fill="none"
+              stroke="var(--accent)"
+              stroke-width="4"
+              stroke-dasharray="289"
+              stroke-dashoffset="289"
+              transform="rotate(-90 50 50)"
+            />
+          </svg>
+        </div>
+        <p id="video-note-hint" class="video-note-hint">Recording… release to send</p>
+      </div>
+
       <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal" id="modal-new">
           <h3>New conversation</h3>
+          <div class="modal-section">
+            <h4>Add by username</h4>
+            <label class="add-by-user-row">
+              <input type="text" id="add-by-username" placeholder="Exact username" autocomplete="off" />
+              <button type="button" id="btn-add-by-username" class="btn primary">Find &amp; chat</button>
+            </label>
+            <p id="add-by-username-status" class="error"></p>
+          </div>
           <input type="search" id="user-search" placeholder="Search users…" />
           <ul id="user-results" class="user-results"></ul>
           <div class="modal-section">
@@ -178,6 +222,8 @@
           <button type="button" class="btn ghost modal-close">Close</button>
         </div>
       </div>
+      <div id="msg-context-menu" class="msg-context-menu hidden" role="menu"></div>
+      <div id="toast-root" class="toast-root" aria-live="polite"></div>
       <div id="incoming-call-sheet" class="incoming-call-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="incoming-call-title">
         <div class="incoming-call-card">
           <p id="incoming-call-title" class="incoming-call-title">Incoming call</p>

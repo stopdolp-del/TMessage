@@ -196,6 +196,26 @@ function handleConnection(ws, wss) {
       );
       return;
     }
+    if (data.type === 'call_offer' || data.type === 'call_answer' || data.type === 'ice_candidate') {
+      const chatId = Number(data.chatId);
+      if (!socketChats.get(ws)?.has(chatId)) return;
+      const signalType =
+        data.type === 'call_offer' ? 'offer' : data.type === 'call_answer' ? 'answer' : 'candidate';
+      broadcastToChat(
+        chatId,
+        {
+          type: 'call_signal',
+          chatId,
+          fromUserId: uid,
+          signalType,
+          sdp: data.sdp,
+          candidate: data.candidate,
+          media: data.media || 'audio',
+        },
+        ws
+      );
+      return;
+    }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[ws]', err);

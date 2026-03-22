@@ -54,6 +54,14 @@ router.get('/', authMiddleware, (req, res) => {
         };
       }
     }
+    const unreadRow = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM messages m
+         JOIN message_receipts rec ON rec.message_id = m.id AND rec.user_id = ?
+         WHERE m.chat_id = ? AND m.deleted = 0 AND m.sender_id != ? AND rec.read_at IS NULL`
+      )
+      .get(uid, r.id, uid);
+    const unread_count = unreadRow?.n ?? 0;
     return {
       id: r.id,
       type: r.type,
@@ -63,6 +71,7 @@ router.get('/', authMiddleware, (req, res) => {
       role: r.role,
       last_body: r.last_body,
       last_at: r.last_at,
+      unread_count,
       peer,
     };
   });

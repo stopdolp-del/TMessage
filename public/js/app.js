@@ -1,9 +1,15 @@
 /**
- * TMessing client: chats, reactions, receipts, search, settings, calls, theme.
+ * TMessage client — Telegram-style UI, WebRTC, video notes.
  */
 import { api, setToken, setRefreshToken, getToken, assetBase } from './api.js';
 import { connectSocket, sendTyping, sendResync, sendHeartbeat, sendCallSignal } from './ws.js';
-import { startOutgoingCall, answerIncomingCall } from './webrtc.js';
+import {
+  startOutgoingCall,
+  answerIncomingCall,
+  setMicMuted,
+  setCameraEnabled,
+  switchCameraFacing,
+} from './webrtc.js';
 
 /** @type {WebSocket | null} */
 let socket = null;
@@ -16,12 +22,11 @@ const messagesByChat = {};
 /** @type {Record<number, number>} */
 const oldestIdByChat = {};
 let typingTimer = null;
+/** @type {any} */
 let voiceSession = null;
-/** Chat id for the active WebRTC session (outgoing or accepted incoming). */
 let callChatId = null;
 /** @type {{ chatId: number; sdp: any; mediaKind: string; fromUserId: number } | null} */
 let pendingIncomingCall = null;
-/** @type {any} */
 let replyTo = null;
 let heartbeatTimer = null;
 let settings = { notify_sound: 1, notify_desktop: 1, theme: 'dark' };
@@ -31,6 +36,118 @@ let receiptReloadTimer;
 let chatListRenderTimer;
 const deliveredPending = new Set();
 let deliveredFlushTimer = null;
+
+let toastTimer = null;
+let chatFilterDebounce = null;
+
+let micMutedUi = false;
+let camOffUi = false;
+
+const videoNoteState = {
+  active: false,
+  mediaRecorder: null,
+  stream: null,
+  chunks: [],
+  tickTimer: null,
+  maxTimer: null,
+};
+
+let recordHoldTimer = null;
+let recordLongPressStarted = false;
+
+const $ = (sel) => document.querySelector(sel);
+const EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🎉', '👏'];
+
+function isMobileLayout() {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+}
+
+function openMobileChatView() {
+  $('#main-layout')?.classList.add('mobile-chat-open');
+}
+
+function closeMobileChatView() {
+  $('#main-layout')?.classList.remove('mobile-chat-open');
+}
+
+window.addEventListener('resize', () => {
+  if (!isMobileLayout()) closeMobileChatView();
+});
+
+function showToast(message) {
+  const root = $('#toast-root');
+  if (!root || !message) return;
+  root.textContent = message;
+  root.classList.add('toast-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    root.classList.remove('toast-visible');
+    root.textContent = '';
+  }, 4200);
+}
+
+function hideMsgContext() {
+  $('#msg-context-menu')?.classList.add('hidden');
+}
+
+function showMsgContext(clientX, clientY, m) {
+  const menu = $('#msg-context-menu');
+  if (!menu) return;
+  menu.innerHTML = '';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'ctx-item';
+  copy.textContent = 'Copy';
+  copy.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const txt = m.body || m.file_name || '';
+    navigator.clipboard?.writeText(txt).catch(() => {});
+    hideMsgContext();
+  });
+  menu.appendChild(copy);
+  if (m.sender_id === me?.id) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'ctx-item ctx-danger';
+    del.textContent = 'Delete';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideMsgContext();
+      if (!confirm('Delete message?')) return;
+      try {
+        await api(`/messages/message/${m.id}`, { method: 'DELETE' });
+      } catch (err) {
+        alert(err.data?.error || err.message);
+      }
+    });
+    menu.appendChild(del);
+  }
+  menu.classList.remove('hidden');
+  const pad = 8;
+  menu.style.left = `${Math.min(clientX, window.innerWidth - 160 - pad)}px`;
+  menu.style.top = `${Math.min(clientY, window.innerHeight - 120 - pad)}px`;
+}
+
+document.addEventListener('click', () => hideMsgContext());
+document.addEventListener('scroll', () => hideMsgContext(), true);
+
+function attachMessageLongPress(div, m) {
+  let t = null;
+  const clear = () => {
+    if (t) clearTimeout(t);
+    t = null;
+  };
+  div.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    t = setTimeout(() => {
+      t = null;
+      showMsgContext(e.clientX, e.clientY, m);
+    }, 480);
+  });
+  div.addEventListener('pointerup', clear);
+  div.addEventListener('pointerleave', clear);
+  div.addEventListener('pointercancel', clear);
+}
 
 function scheduleReceiptReload() {
   clearTimeout(receiptReloadTimer);
@@ -60,10 +177,6 @@ function scheduleChatListRender() {
     renderChatList($('#chat-search')?.value || '');
   }, 80);
 }
-
-const $ = (sel) => document.querySelector(sel);
-
-const EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🎉', '👏'];
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach((el) => el.classList.add('hidden'));
@@ -146,12 +259,18 @@ function renderChatList(filter = '') {
         c.type === 'private' && c.peer?.status_text
           ? escapeHtml(c.peer.status_text)
           : '';
+      const unread = Number(c.unread_count) || 0;
+      const badge =
+        unread > 0
+          ? `<span class="unread-badge">${unread > 99 ? '99+' : unread}</span>`
+          : '';
       li.innerHTML = `
         <img class="avatar" alt="" src="${avatar ? assetBase() + avatar : ''}" />
         <div class="meta">
           <div class="name">${escapeHtml(c.name || 'Chat')}${verified}</div>
           <div class="preview">${escapeHtml((c.last_body || sub || '').slice(0, 80))}</div>
         </div>
+        ${badge}
       `;
       li.addEventListener('click', () => selectChat(c.id));
       ul.appendChild(li);
@@ -209,11 +328,22 @@ function scrollMessagesToBottom(box) {
   });
 }
 
+function syncCallToolbar(kind) {
+  const isVideo = kind === 'video';
+  $('#btn-call-cam')?.classList.toggle('hidden', !isVideo);
+  $('#btn-call-flip')?.classList.toggle('hidden', !isVideo);
+  micMutedUi = false;
+  camOffUi = false;
+  $('#btn-call-mute')?.classList.toggle('muted', false);
+  $('#btn-call-cam')?.classList.toggle('cam-off', false);
+}
+
 async function selectChat(chatId) {
   activeChatId = chatId;
+  const c = chats.find((x) => x.id === chatId);
+  if (c) c.unread_count = 0;
   $('#chat-placeholder')?.classList.add('hidden');
   $('#chat-panel')?.classList.remove('hidden');
-  const c = chats.find((x) => x.id === chatId);
   const title = $('#chat-title');
   const sub = $('#chat-sub');
   if (title) title.innerHTML = escapeHtml(c?.name || 'Chat');
@@ -226,6 +356,7 @@ async function selectChat(chatId) {
   }
   renderChatList($('#chat-search')?.value || '');
   await loadMessages(chatId);
+  if (isMobileLayout()) openMobileChatView();
   const list = messagesByChat[chatId] || [];
   const maxId = list.length ? Math.max(...list.map((m) => m.id)) : 0;
   if (maxId) {
@@ -247,15 +378,26 @@ async function loadMessages(chatId, before = null) {
   if (before) {
     const cur = messagesByChat[chatId] || [];
     messagesByChat[chatId] = [...messages, ...cur];
+    const box = $('#messages');
+    if (box && chatId === activeChatId && messages.length) {
+      const prevH = box.scrollHeight;
+      const prevTop = box.scrollTop;
+      const frag = document.createDocumentFragment();
+      messages.forEach((m) => frag.appendChild(buildMessageElement(m)));
+      box.insertBefore(frag, box.firstChild);
+      box.scrollTop = prevTop + (box.scrollHeight - prevH);
+    }
   } else {
     messagesByChat[chatId] = messages;
+    renderMessages(chatId);
   }
   if (messages.length) oldestIdByChat[chatId] = messages[0].id;
   $('#btn-load-more')?.classList.toggle('hidden', messages.length < 40);
-  renderMessages(chatId);
-  messages.forEach((m) => {
-    if (m.sender_id !== me?.id) queueDeliveredAck(m.id);
-  });
+  if (!before) {
+    messages.forEach((m) => {
+      if (m.sender_id !== me?.id) queueDeliveredAck(m.id);
+    });
+  }
 }
 
 function receiptLabel(m) {
@@ -271,6 +413,7 @@ function buildMessageElement(m) {
   div.className = 'msg' + (own ? ' own' : '');
   div.dataset.id = String(m.id);
   const badge = m.is_admin ? ' <span class="badge" title="Admin">✔</span>' : '';
+  const isVideoNote = !!(m.video_note && m.file_path && m.file_mime?.startsWith('video/'));
   let bodyHtml = escapeHtml(m.body || '');
   if (m.forward_from_label) {
     bodyHtml = `<div class="forward-hint">↪ ${escapeHtml(m.forward_from_label)}</div>` + bodyHtml;
@@ -283,7 +426,11 @@ function buildMessageElement(m) {
   if (m.msg_type === 'image' && m.file_path) {
     bodyHtml += `<br><img class="attach" src="${assetBase()}${m.file_path}" alt="" loading="lazy" />`;
   } else if (m.file_path && m.file_mime?.startsWith('video/')) {
-    bodyHtml += `<br><video class="attach" src="${assetBase()}${m.file_path}" controls playsinline></video>`;
+    if (isVideoNote) {
+      bodyHtml += `<div class="video-note-wrap"><video class="video-note-bubble" src="${assetBase()}${m.file_path}" playsinline loop preload="metadata"></video><button type="button" class="video-note-play" aria-label="Play">▶</button></div>`;
+    } else {
+      bodyHtml += `<br><video class="attach" src="${assetBase()}${m.file_path}" controls playsinline></video>`;
+    }
   } else if (m.file_path && m.file_mime?.startsWith('audio/')) {
     bodyHtml += `<br><audio class="attach" src="${assetBase()}${m.file_path}" controls></audio>`;
   } else if (m.msg_type === 'file' && m.file_path && !m.file_mime?.startsWith('audio/')) {
@@ -347,6 +494,26 @@ function buildMessageElement(m) {
     if (!confirm('Delete message?')) return;
     await api(`/messages/message/${m.id}`, { method: 'DELETE' });
   });
+  div.querySelectorAll('.video-note-wrap video').forEach((v) => {
+    const wrap = v.closest('.video-note-wrap');
+    const btn = wrap?.querySelector('.video-note-play');
+    btn?.addEventListener('click', () => {
+      if (v.paused) {
+        v.play();
+        btn.textContent = '⏸';
+      } else {
+        v.pause();
+        btn.textContent = '▶';
+      }
+    });
+    v.addEventListener('play', () => {
+      if (btn) btn.textContent = '⏸';
+    });
+    v.addEventListener('pause', () => {
+      if (btn) btn.textContent = '▶';
+    });
+  });
+  attachMessageLongPress(div, m);
   return div;
 }
 
@@ -405,6 +572,14 @@ function patchMessage(chatId, updated) {
   if (chatId === activeChatId) renderMessages(chatId);
 }
 
+function bumpUnread(chatId) {
+  const c = chats.find((x) => x.id === chatId);
+  if (c) {
+    c.unread_count = (Number(c.unread_count) || 0) + 1;
+    scheduleChatListRender();
+  }
+}
+
 function appendMessage(chatId, m) {
   if (!messagesByChat[chatId]) messagesByChat[chatId] = [];
   if (messagesByChat[chatId].some((x) => x.id === m.id)) return;
@@ -423,8 +598,15 @@ function appendMessage(chatId, m) {
   }
   chats.sort((a, b) => (b.last_at || 0) - (a.last_at || 0));
   scheduleChatListRender();
+  const preview = `${m.username}: ${m.body || m.file_name || 'Attachment'}`;
+  if (m.sender_id !== me?.id && chatId !== activeChatId) {
+    bumpUnread(chatId);
+  }
+  if (m.sender_id !== me?.id && (chatId !== activeChatId || document.hidden)) {
+    showToast(`${chatLabelForId(chatId)} · ${preview}`);
+  }
   if (document.hidden && settings.notify_desktop) {
-    const body = `${m.username}: ${m.body || m.file_name || ''}`;
+    const body = preview;
     if (window.tmessing?.showNotification) {
       window.tmessing.showNotification('TMessage', body);
     } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -534,9 +716,6 @@ function onSocketEvent(data) {
   }
 }
 
-/**
- * @param {boolean} [fromRemote] If true, do not send hang-up signal to peer (avoid loop).
- */
 function endVoice(fromRemote) {
   if (!fromRemote && callChatId && socket && socket.readyState === WebSocket.OPEN) {
     sendCallSignal(socket, callChatId, { signalType: 'end', media: 'audio' });
@@ -549,9 +728,20 @@ function endVoice(fromRemote) {
   voiceSession = null;
   const rv = $('#remote-video');
   const ra = $('#remote-audio');
-  if (rv) rv.srcObject = null;
+  const lv = $('#local-video');
+  const ov = $('#call-overlay');
+  if (rv) {
+    rv.srcObject = null;
+    rv.muted = true;
+  }
   if (ra) ra.srcObject = null;
-  $('#call-overlay')?.classList.add('hidden');
+  if (lv) {
+    lv.srcObject = null;
+    lv.hidden = true;
+  }
+  ov?.classList.remove('call-overlay--video', 'call-overlay--audio');
+  ov?.classList.add('hidden');
+  syncCallToolbar('audio');
 }
 
 function setupSocket() {
@@ -582,6 +772,117 @@ async function sendCurrentMessage(text, file) {
   appendMessage(activeChatId, res.message);
   replyTo = null;
   $('#reply-preview')?.classList.add('hidden');
+}
+
+async function sendVideoNoteFile(file) {
+  if (!activeChatId) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('text', ' ');
+  fd.append('video_note', '1');
+  if (replyTo) fd.append('reply_to_id', String(replyTo.id));
+  const res = await api(`/messages/chat/${activeChatId}`, { method: 'POST', body: fd });
+  appendMessage(activeChatId, res.message);
+  replyTo = null;
+  $('#reply-preview')?.classList.add('hidden');
+}
+
+function stopVideoNoteRecording() {
+  if (!videoNoteState.active) return;
+  videoNoteState.active = false;
+  clearInterval(videoNoteState.tickTimer);
+  clearTimeout(videoNoteState.maxTimer);
+  videoNoteState.tickTimer = null;
+  videoNoteState.maxTimer = null;
+  const overlay = $('#video-note-overlay');
+  const preview = $('#video-note-preview');
+  const prog = $('#video-note-progress');
+  overlay?.classList.add('hidden');
+  if (prog) prog.style.strokeDashoffset = '289';
+  const stream = videoNoteState.stream;
+  stream?.getTracks().forEach((t) => t.stop());
+  if (preview) preview.srcObject = null;
+  const mr = videoNoteState.mediaRecorder;
+  return new Promise((resolve) => {
+    if (mr && mr.state !== 'inactive') {
+      mr.onstop = () => resolve();
+      mr.stop();
+    } else resolve();
+  }).then(() => {
+    const chunks = videoNoteState.chunks;
+    videoNoteState.chunks = [];
+    videoNoteState.mediaRecorder = null;
+    videoNoteState.stream = null;
+    const blob = new Blob(chunks, { type: mr?.mimeType || 'video/webm' });
+    if (blob.size > 500) {
+      return sendVideoNoteFile(new File([blob], `vn-${Date.now()}.webm`, { type: blob.type }));
+    }
+  });
+}
+
+async function startVideoNoteRecording() {
+  if (!activeChatId || videoNoteState.active) return;
+  const overlay = $('#video-note-overlay');
+  const preview = $('#video-note-preview');
+  const hint = $('#video-note-hint');
+  overlay?.classList.remove('hidden');
+  if (hint) hint.textContent = 'Recording… release to send';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
+    });
+    videoNoteState.stream = stream;
+    if (preview) preview.srcObject = stream;
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    videoNoteState.mediaRecorder = mr;
+    videoNoteState.chunks = [];
+    mr.ondataavailable = (e) => {
+      if (e.data.size) videoNoteState.chunks.push(e.data);
+    };
+    mr.start(200);
+    videoNoteState.active = true;
+    const start = Date.now();
+    const maxMs = 55000;
+    const prog = $('#video-note-progress');
+    const circ = 289;
+    videoNoteState.tickTimer = setInterval(() => {
+      const t = Date.now() - start;
+      const p = Math.min(1, t / maxMs);
+      if (prog) prog.style.strokeDashoffset = String(circ * (1 - p));
+      if (t >= maxMs) stopVideoNoteRecording();
+    }, 120);
+    videoNoteState.maxTimer = setTimeout(() => stopVideoNoteRecording(), maxMs);
+  } catch (e) {
+    console.error(e);
+    overlay?.classList.add('hidden');
+    alert('Camera not available');
+  }
+}
+
+async function runVoiceClip() {
+  if (!activeChatId) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    const chunks = [];
+    mediaRecorder.ondataavailable = (ev) => chunks.push(ev.data);
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+      await sendCurrentMessage('', file);
+    };
+    mediaRecorder.start();
+    setTimeout(() => mediaRecorder?.stop(), 4000);
+  } catch {
+    alert('Microphone not available');
+  }
 }
 
 // --- Auth ---
@@ -647,7 +948,10 @@ $('#btn-logout')?.addEventListener('click', async () => {
   showScreen('#auth-screen');
 });
 
-$('#chat-search')?.addEventListener('input', (e) => renderChatList(e.target.value));
+$('#chat-search')?.addEventListener('input', (e) => {
+  clearTimeout(chatFilterDebounce);
+  chatFilterDebounce = setTimeout(() => renderChatList(e.target.value), 120);
+});
 
 $('#btn-load-more')?.addEventListener('click', async () => {
   if (!activeChatId || !oldestIdByChat[activeChatId]) return;
@@ -675,11 +979,15 @@ $('#reply-cancel')?.addEventListener('click', () => {
   $('#reply-preview')?.classList.add('hidden');
 });
 
+let typingDebounce;
 $('#msg-input')?.addEventListener('input', () => {
   if (!activeChatId || !socket) return;
-  sendTyping(socket, activeChatId, true);
-  clearTimeout(typingTimer);
-  typingTimer = setTimeout(() => sendTyping(socket, activeChatId, false), 2000);
+  clearTimeout(typingDebounce);
+  typingDebounce = setTimeout(() => {
+    sendTyping(socket, activeChatId, true);
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => sendTyping(socket, activeChatId, false), 2000);
+  }, 80);
 });
 
 $('#composer')?.addEventListener('dragover', (e) => {
@@ -716,24 +1024,28 @@ $('#btn-emoji')?.addEventListener('click', () => {
   } else pop.classList.add('hidden');
 });
 
-$('#btn-record')?.addEventListener('click', async () => {
-  if (!activeChatId) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
-    const chunks = [];
-    mediaRecorder.ondataavailable = (ev) => chunks.push(ev.data);
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-      await sendCurrentMessage('', file);
-    };
-    mediaRecorder.start();
-    setTimeout(() => mediaRecorder?.stop(), 4000);
-  } catch {
-    alert('Microphone not available');
+const btnRecord = $('#btn-record');
+btnRecord?.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || !activeChatId) return;
+  recordLongPressStarted = false;
+  recordHoldTimer = setTimeout(() => {
+    recordHoldTimer = null;
+    recordLongPressStarted = true;
+    startVideoNoteRecording();
+  }, 350);
+});
+btnRecord?.addEventListener('pointerup', async () => {
+  if (recordHoldTimer) {
+    clearTimeout(recordHoldTimer);
+    recordHoldTimer = null;
+    if (!recordLongPressStarted) runVoiceClip();
+    return;
   }
+  if (videoNoteState.active) await stopVideoNoteRecording();
+});
+btnRecord?.addEventListener('pointercancel', async () => {
+  if (recordHoldTimer) clearTimeout(recordHoldTimer);
+  if (videoNoteState.active) await stopVideoNoteRecording();
 });
 
 $('#btn-voice')?.addEventListener('click', async () => {
@@ -743,7 +1055,11 @@ $('#btn-voice')?.addEventListener('click', async () => {
     return;
   }
   callChatId = activeChatId;
-  $('#call-overlay')?.classList.remove('hidden');
+  const ov = $('#call-overlay');
+  ov?.classList.remove('call-overlay--video');
+  ov?.classList.add('call-overlay--audio');
+  ov?.classList.remove('hidden');
+  syncCallToolbar('audio');
   setCallStatus('Ringing…');
   try {
     voiceSession = await startOutgoingCall(
@@ -755,7 +1071,8 @@ $('#btn-voice')?.addEventListener('click', async () => {
         if (ra) ra.srcObject = stream;
       },
       () => endVoice(),
-      'audio'
+      'audio',
+      null
     );
   } catch {
     endVoice();
@@ -769,8 +1086,13 @@ $('#btn-video')?.addEventListener('click', async () => {
     return;
   }
   callChatId = activeChatId;
-  $('#call-overlay')?.classList.remove('hidden');
+  const ov = $('#call-overlay');
+  ov?.classList.remove('call-overlay--audio');
+  ov?.classList.add('call-overlay--video');
+  ov?.classList.remove('hidden');
+  syncCallToolbar('video');
   setCallStatus('Ringing…');
+  const lv = $('#local-video');
   try {
     voiceSession = await startOutgoingCall(
       socket,
@@ -784,10 +1106,41 @@ $('#btn-video')?.addEventListener('click', async () => {
         }
       },
       () => endVoice(),
-      'video'
+      'video',
+      (local) => {
+        if (lv) {
+          lv.srcObject = local;
+          lv.hidden = false;
+        }
+      }
     );
   } catch {
     endVoice();
+  }
+});
+
+$('#btn-call-mute')?.addEventListener('click', () => {
+  const s = voiceSession?.localStream;
+  if (!s) return;
+  micMutedUi = !micMutedUi;
+  setMicMuted(s, micMutedUi);
+  $('#btn-call-mute')?.classList.toggle('muted', micMutedUi);
+});
+
+$('#btn-call-cam')?.addEventListener('click', () => {
+  const s = voiceSession?.localStream;
+  if (!s) return;
+  camOffUi = !camOffUi;
+  setCameraEnabled(s, !camOffUi);
+  $('#btn-call-cam')?.classList.toggle('cam-off', camOffUi);
+});
+
+$('#btn-call-flip')?.addEventListener('click', async () => {
+  if (!voiceSession?.pc || !voiceSession?.localStream) return;
+  try {
+    await switchCameraFacing(voiceSession.pc, voiceSession.localStream);
+  } catch (e) {
+    console.error(e);
   }
 });
 
@@ -798,11 +1151,16 @@ $('#btn-call-accept')?.addEventListener('click', async () => {
   hideIncomingSheet();
   callChatId = p.chatId;
   await selectChat(p.chatId);
-  $('#call-overlay')?.classList.remove('hidden');
+  const ov = $('#call-overlay');
+  const kind = p.mediaKind === 'video' ? 'video' : 'audio';
+  ov?.classList.toggle('call-overlay--video', kind === 'video');
+  ov?.classList.toggle('call-overlay--audio', kind === 'audio');
+  ov?.classList.remove('hidden');
+  syncCallToolbar(kind);
   setCallStatus('Connecting…');
   const rv = $('#remote-video');
   const ra = $('#remote-audio');
-  const kind = p.mediaKind === 'video' ? 'video' : 'audio';
+  const lv = $('#local-video');
   try {
     voiceSession = await answerIncomingCall(
       socket,
@@ -818,7 +1176,15 @@ $('#btn-call-accept')?.addEventListener('click', async () => {
         }
       },
       () => endVoice(),
-      kind
+      kind,
+      kind === 'video'
+        ? (local) => {
+            if (lv) {
+              lv.srcObject = local;
+              lv.hidden = false;
+            }
+          }
+        : null
     );
   } catch {
     endVoice();
@@ -837,6 +1203,10 @@ $('#btn-call-decline')?.addEventListener('click', () => {
 });
 
 $('#btn-end-call')?.addEventListener('click', () => endVoice());
+
+$('#btn-back-chats')?.addEventListener('click', () => {
+  closeMobileChatView();
+});
 
 $('#btn-theme')?.addEventListener('click', async () => {
   const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
@@ -868,11 +1238,19 @@ $('#btn-settings')?.addEventListener('click', async () => {
 
 $('#form-settings')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const wantDesktop = $('#set-notify-desktop')?.checked;
+  if (wantDesktop && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try {
+      await Notification.requestPermission();
+    } catch {
+      /* ignore */
+    }
+  }
   try {
     await api('/settings/me', {
       method: 'PATCH',
       body: JSON.stringify({
-        notify_desktop: $('#set-notify-desktop').checked,
+        notify_desktop: wantDesktop,
         notify_sound: $('#set-notify-sound').checked,
         privacy_show_last_seen: $('#set-privacy-seen').checked,
       }),
@@ -942,6 +1320,31 @@ document.querySelectorAll('.modal-close').forEach((b) => {
   b.addEventListener('click', () => {
     $('#modal-overlay')?.classList.add('hidden');
   });
+});
+
+$('#btn-add-by-username')?.addEventListener('click', async () => {
+  const inp = $('#add-by-username');
+  const status = $('#add-by-username-status');
+  const name = inp?.value?.trim().toLowerCase();
+  if (!name) {
+    if (status) status.textContent = 'Enter a username';
+    return;
+  }
+  if (status) status.textContent = '';
+  try {
+    const { user } = await api(`/users/search?username=${encodeURIComponent(name)}`);
+    if (!user) {
+      if (status) status.textContent = 'User not found';
+      return;
+    }
+    const { chatId } = await api(`/chats/private/${user.id}`, { method: 'POST' });
+    $('#modal-overlay')?.classList.add('hidden');
+    await loadChats();
+    await selectChat(chatId);
+    sendResync(socket);
+  } catch (err) {
+    if (status) status.textContent = err.data?.error || err.message || 'Failed';
+  }
 });
 
 $('#user-search')?.addEventListener(
