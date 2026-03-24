@@ -31,12 +31,7 @@
           <form id="form-register" class="auth-form hidden" method="post" action="#">
             <label>Username <input type="text" name="username" minlength="2" required autocomplete="username" /></label>
             <label>Password <input type="password" name="password" minlength="8" required autocomplete="new-password" /></label>
-            <input type="hidden" name="captchaId" id="register-captcha-id" value="" />
-            <label class="captcha-block">
-              <span id="register-captcha-q" class="captcha-q">Loading security check…</span>
-              <input type="text" name="captchaAnswer" id="register-captcha-answer" inputmode="numeric" autocomplete="off" placeholder="Your answer" required />
-            </label>
-            <button type="button" id="btn-captcha-refresh" class="btn ghost small">New question</button>
+            <label>Security: What is 10 + 5? <input type="text" name="captcha" inputmode="numeric" autocomplete="off" placeholder="Answer" required /></label>
             <button type="submit" class="btn primary">Create account</button>
             <p id="register-error" class="error"></p>
           </form>

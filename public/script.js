@@ -53,20 +53,17 @@ onReady(() => {
   const form = document.getElementById('form-register');
   if (!form) return;
 
-  document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      if (tab.getAttribute('data-tab') === 'register') loadRegisterCaptcha();
-    });
-  });
-
-  document.getElementById('btn-captcha-refresh')?.addEventListener('click', () => loadRegisterCaptcha());
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const usernameInput = form.querySelector('input[name="username"]');
     const passwordInput = form.querySelector('input[name="password"]');
-    const captchaId = document.getElementById('register-captcha-id')?.value || '';
-    const captchaAnswer = document.getElementById('register-captcha-answer')?.value ?? '';
+    const captchaAnswer = document.querySelector('input[name="captcha"]')?.value ?? '';
+
+    console.log('[REGISTER] Form data:', {
+      username: usernameInput?.value,
+      password: passwordInput?.value ? '***' : '',
+      answer: captchaAnswer
+    });
 
     showRegisterMessage('');
     setRegisterFormLoading(form, true);
@@ -78,13 +75,14 @@ onReady(() => {
         body: JSON.stringify({
           username: usernameInput?.value ?? '',
           password: passwordInput?.value ?? '',
-          captchaId,
-          captchaAnswer,
+          answer: captchaAnswer,
         }),
       });
 
       let data = {};
       const raw = await res.text();
+      console.log('[REGISTER] Response:', res.status, raw);
+      
       if (raw) {
         try {
           data = JSON.parse(raw);
@@ -107,7 +105,6 @@ onReady(() => {
       console.error('[TMessage] register', err);
       alert(err?.message || 'Registration failed');
       showRegisterMessage(err?.message || 'Registration failed');
-      await loadRegisterCaptcha();
     } finally {
       setRegisterFormLoading(form, false);
     }

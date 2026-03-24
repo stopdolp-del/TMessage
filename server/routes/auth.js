@@ -30,72 +30,54 @@ function placeholderEmail(username) {
   return `u_${h}@tmessage.local`;
 }
 
-router.post(
-  '/register',
-  [
-    body('username')
-      .trim()
-      .isLength({ min: 2, max: 32 })
-      .matches(/^[\p{L}\p{N}_.-]+$/u)
-      .withMessage('Username: 2–32 chars, letters, numbers, _ . -'),
-    body('password').isLength({ min: 8, max: 128 }).withMessage('Password: at least 8 characters'),
-    body('captchaId').notEmpty().withMessage('Captcha required'),
-    body('captchaAnswer').notEmpty().withMessage('Answer the captcha'),
-  ],
-  async (req, res, next) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        const first = errors.array()[0];
-        return res.status(400).json({
-          error: 'Invalid data',
-          details: first.msg,
-        });
-      }
-      const { username, password, captchaId, captchaAnswer } = req.body;
-      if (!validateCaptcha(captchaId, captchaAnswer)) {
-        return res.status(400).json({
-          error: 'Invalid captcha',
-          details: 'Wrong answer or expired. Request a new question.',
-        });
-      }
-      const db = getDb();
-      const uname = username.trim();
-      const exists = db.prepare('SELECT id FROM users WHERE lower(username) = ?').get(uname.toLowerCase());
-      if (exists) {
-        return res.status(409).json({ error: 'User exists' });
-      }
-      const hash = await bcrypt.hash(password, SALT);
-      const email = placeholderEmail(uname);
-      const isAdmin = uname.toLowerCase() === config.adminUsername.toLowerCase();
-      const result = db
-        .prepare(
-          `INSERT INTO users (email, password_hash, username, is_verified, is_admin, verification_token, verification_expires)
-         VALUES (?, ?, ?, 1, ?, NULL, NULL)`
-        )
-        .run(email, hash, uname, isAdmin ? 1 : 0);
-      const userId = result.lastInsertRowid;
-      const accessToken = signAccessToken({ sub: userId });
-      const refreshToken = createRefreshSession(userId);
-      db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(userId);
-      res.status(201).json({
-        token: accessToken,
-        refreshToken,
-        user: {
-          id: userId,
-          username: uname,
-          is_admin: !!isAdmin,
-        },
-      });
-    } catch (e) {
-      const msg = e && e.message ? String(e.message) : '';
-      if (msg.includes('UNIQUE') || msg.includes('unique')) {
-        return res.status(409).json({ error: 'User exists' });
-      }
-      next(e);
+router.post('/register', async (req, res) => {
+  try {
+    console.log('[REGISTER] Request body:', req.body);
+    
+    const { username, password, answer } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "Missing username or password" });
     }
+
+    if (answer != 15) {
+      console.log('[REGISTER] Wrong captcha answer:', answer);
+      return res.status(400).json({ error: "Wrong captcha" });
+    }
+
+    const db = getDb();
+    console.log('[REGISTER] Checking if user exists:', username);
+
+    const existing = db.prepare("SELECT id FROM users WHERE lower(username) = ?").get(username.toLowerCase());
+
+    if (existing) {
+      console.log('[REGISTER] User already exists:', username);
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    console.log('[REGISTER] Creating new user:', username);
+    const hash = await bcrypt.hash(password, SALT);
+    const email = placeholderEmail(username);
+    const isAdmin = config.isAdmin(username);
+    
+    const result = db.prepare(
+      `INSERT INTO users (email, password_hash, username, is_verified, is_admin, verification_token, verification_expires)
+       VALUES (?, ?, ?, 1, ?, NULL, NULL)`
+    ).run(email, hash, username, isAdmin ? 1 : 0);
+    
+    console.log('[REGISTER] User created successfully:', username, 'ID:', result.lastInsertRowid);
+    
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error("[REGISTER] CRASH:", err);
+    const msg = err && err.message ? String(err.message) : '';
+    if (msg.includes('UNIQUE') || msg.includes('unique')) {
+      return res.status(409).json({ error: "User already exists" });
+    }
+    return res.status(500).json({ error: err.message || "Registration failed" });
   }
-);
+});
 
 router.post(
   '/login',
