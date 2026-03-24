@@ -11,9 +11,23 @@ const config = require('../config');
 const router = express.Router();
 
 function requireAdmin(req, res, next) {
-  if (!req.user || !config.isAdmin(req.user.username)) {
-    return res.status(403).json({ error: 'Admin access required' });
+  console.log('[ADMIN CHECK]', {
+    user: req.user,
+    username: req.user?.username,
+    isAdmin: req.user ? config.isAdmin(req.user.username) : false
+  });
+  
+  if (!req.user) {
+    console.log('[ADMIN] No user found in request');
+    return res.status(401).json({ error: "Not logged in" });
   }
+  
+  if (!config.isAdmin(req.user.username)) {
+    console.log('[ADMIN] User not admin:', req.user.username);
+    return res.status(403).json({ error: "Forbidden - Admin access required" });
+  }
+  
+  console.log('[ADMIN] Access granted to:', req.user.username);
   next();
 }
 
@@ -21,13 +35,20 @@ router.use(authMiddleware, requireAdmin);
 
 // Get all users
 router.get('/users', (req, res) => {
-  const db = getDb();
-  const users = db.prepare(`
-    SELECT id, username, email, created_at, is_banned, is_admin, is_verified 
-    FROM users 
-    ORDER BY created_at DESC
-  `).all();
-  res.json(users);
+  try {
+    console.log('[ADMIN] Getting all users');
+    const db = getDb();
+    const users = db.prepare(`
+      SELECT id, username, email, created_at, is_banned, is_admin, is_verified 
+      FROM users 
+      ORDER BY created_at DESC
+    `).all();
+    console.log('[ADMIN] Retrieved users:', users.length);
+    res.json(users);
+  } catch (error) {
+    console.error('[ADMIN] Error getting users:', error);
+    res.status(500).json({ error: 'Failed to retrieve users' });
+  }
 });
 
 // Ban user by username
@@ -35,87 +56,114 @@ router.post('/ban', [
   body('username').trim().isLength({ min: 1 }).withMessage('Username is required'),
   body('reason').optional().isLength({ max: 500 }).withMessage('Reason too long')
 ], (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-  
-  const { username, reason } = req.body;
-  const db = getDb();
-  
-  // Check if user exists
-  const user = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(username);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  
-  // Don't allow banning admins
-  if (config.isAdmin(user.username)) {
-    return res.status(400).json({ error: 'Cannot ban admin users' });
+  try {
+    console.log('[ADMIN] Ban request:', req.body);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    
+    const { username, reason } = req.body;
+    const db = getDb();
+    
+    // Check if user exists
+    const user = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+    if (!user) {
+      console.log('[ADMIN] User not found:', username);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Don't allow banning admins
+    if (config.isAdmin(user.username)) {
+      console.log('[ADMIN] Attempt to ban admin:', user.username);
+      return res.status(400).json({ error: 'Cannot ban admin users' });
+    }
+    
+    // Update ban status
+    db.prepare('UPDATE users SET is_banned = 1 WHERE id = ?').run(user.id);
+    
+    // Log the ban action
+    console.log(`[ADMIN] ${req.user.username} banned user: ${user.username} (ID: ${user.id})${reason ? ` - Reason: ${reason}` : ''}`);
+    
+    res.json({ 
+      success: true, 
+      user: { id: user.id, username: user.username, banned: true },
+      reason: reason || null
+    });
+  } catch (error) {
+    console.error('[ADMIN] Error banning user:', error);
+    res.status(500).json({ error: 'Failed to ban user' });
   }
-  
-  // Update ban status
-  db.prepare('UPDATE users SET is_banned = 1 WHERE id = ?').run(user.id);
-  
-  // Log the ban action
-  console.log(`[ADMIN] ${req.user.username} banned user: ${user.username} (ID: ${user.id})${reason ? ` - Reason: ${reason}` : ''}`);
-  
-  res.json({ 
-    success: true, 
-    user: { id: user.id, username: user.username, banned: true },
-    reason: reason || null
-  });
 });
 
 // Unban user by username
 router.post('/unban', [
   body('username').trim().isLength({ min: 1 }).withMessage('Username is required')
 ], (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-  
-  const { username } = req.body;
-  const db = getDb();
-  
-  // Check if user exists
-  const user = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(username);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  
-  // Update ban status
-  db.prepare('UPDATE users SET is_banned = 0 WHERE id = ?').run(user.id);
-  
-  // Log the unban action
-  console.log(`[ADMIN] ${req.user.username} unbanned user: ${user.username} (ID: ${user.id})`);
-  
-  res.json({ 
-    success: true, 
-    user: { id: user.id, username: user.username, banned: false }
-  });
+  try {
+    console.log('[ADMIN] Unban request:', req.body);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    
+    const { username } = req.body;
+    const db = getDb();
+    
+    // Check if user exists
+    const user = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+    if (!user) {
+      console.log('[ADMIN] User not found for unban:', username);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Update ban status
+    db.prepare('UPDATE users SET is_banned = 0 WHERE id = ?').run(user.id);
+    
+    // Log the unban action
+    console.log(`[ADMIN] ${req.user.username} unbanned user: ${user.username} (ID: ${user.id})`);
+    
+    res.json({ 
+      success: true, 
+      user: { id: user.id, username: user.username, banned: false }
+    });
+  } catch (error) {
+    console.error('[ADMIN] Error unbanning user:', error);
+    res.status(500).json({ error: 'Failed to unban user' });
+  }
 });
 
 // Get all messages
 router.get('/messages', (req, res) => {
-  const db = getDb();
-  const limit = parseInt(req.query.limit) || 100;
-  const offset = parseInt(req.query.offset) || 0;
-  
-  const messages = db.prepare(`
-    SELECT 
-      m.*,
-      u.username as sender_username
-    FROM messages m
-    JOIN users u ON m.sender_id = u.id
-    ORDER BY m.created_at DESC
-    LIMIT ? OFFSET ?
-  `).all(limit, offset);
-  
-  const total = db.prepare('SELECT COUNT(*) as count FROM messages').get();
-  
-  res.json({
-    messages,
-    pagination: {
-      total: total.count,
-      limit,
-      offset,
-      hasMore: offset + limit < total.count
-    }
-  });
+  try {
+    console.log('[ADMIN] Getting messages with pagination:', req.query);
+    const db = getDb();
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // Cap at 500
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0); // Ensure non-negative
+    
+    const messages = db.prepare(`
+      SELECT 
+        m.*,
+        u.username as sender_username
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      ORDER BY m.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+    
+    const total = db.prepare('SELECT COUNT(*) as count FROM messages').get();
+    
+    console.log('[ADMIN] Retrieved messages:', messages.length, 'total:', total.count);
+    
+    res.json({
+      messages,
+      pagination: {
+        total: total.count,
+        limit,
+        offset,
+        hasMore: offset + limit < total.count
+      }
+    });
+  } catch (error) {
+    console.error('[ADMIN] Error getting messages:', error);
+    res.status(500).json({ error: 'Failed to retrieve messages' });
+  }
 });
 
 router.post(

@@ -84,6 +84,8 @@ const NO_REFRESH_PATHS = new Set([
 ]);
 
 async function api(path, opts = {}) {
+  console.log('[API] Request:', path, opts.method || 'GET');
+  
   const headers = { ...opts.headers };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -94,8 +96,9 @@ async function api(path, opts = {}) {
   let res;
   try {
     res = await fetch(`${BASE()}${path}`, { ...opts, headers });
+    console.log('[API] Response:', path, res.status);
   } catch (e) {
-    console.error('[TMessage] network', path, e);
+    console.error('[API] Network error:', path, e);
     const err = new Error('Network error — check API URL and connection');
     err.status = 0;
     err.data = {};
@@ -103,13 +106,15 @@ async function api(path, opts = {}) {
   }
 
   if (res.status === 401 && !NO_REFRESH_PATHS.has(path)) {
+    console.log('[API] Attempting token refresh for:', path);
     const ok = await tryRefresh();
     if (ok) {
       headers.Authorization = `Bearer ${getToken()}`;
       try {
         res = await fetch(`${BASE()}${path}`, { ...opts, headers });
+        console.log('[API] Refresh retry response:', path, res.status);
       } catch (e) {
-        console.error('[TMessage] network retry', path, e);
+        console.error('[API] Network retry error:', path, e);
         throw e;
       }
     }
@@ -119,17 +124,21 @@ async function api(path, opts = {}) {
   let data;
   try {
     data = text ? JSON.parse(text) : {};
-  } catch {
+  } catch (parseError) {
+    console.error('[API] JSON parse error:', path, parseError, 'Raw text:', text);
     data = { raw: text };
   }
+  
   if (!res.ok) {
     const msg = formatApiError(res.status, data);
+    console.error('[API] API error:', path, res.status, msg, data);
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
-    console.warn('[TMessage] API', path, res.status, data);
     throw err;
   }
+  
+  console.log('[API] Success:', path);
   return data;
 }
 

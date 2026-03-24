@@ -33,7 +33,21 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(cors());
-app.use(express.json({ limit: '4mb' }));
+
+// Add JSON parsing with error handling
+app.use(express.json({ 
+  limit: '4mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('[JSON] Parse error:', err);
+    return res.status(400).json({ error: 'Invalid JSON in request body' });
+  }
+  next();
+});
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 const apiLimiter = rateLimit({
@@ -47,6 +61,16 @@ const authLimiter = rateLimit({
   max: 50,
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Add debug logging for all requests
+app.use((req, res, next) => {
+  console.log('[REQUEST]', req.method, req.url, {
+    body: req.body,
+    user: req.user ? req.user.username : 'none',
+    ip: req.ip
+  });
+  next();
 });
 
 app.use('/api', apiLimiter);
@@ -80,8 +104,34 @@ app.get('*', (req, res, next) => {
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  console.error('[TMessage] API error', err.message || err);
-  res.status(500).json({ error: 'Internal server error' });
+  console.error('[ERROR]', {
+    message: err.message || err,
+    stack: err.stack,
+    url: req.url,
+    method: req.method,
+    body: req.body,
+    user: req.user ? req.user.username : 'none',
+    ip: req.ip
+  });
+  
+  // Send proper error response
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ 
+      error: 'Validation failed', 
+      details: err.message 
+    });
+  }
+  
+  if (err.name === 'UnauthorizedError') {
+    return res.status(401).json({ 
+      error: 'Authentication required' 
+    });
+  }
+  
+  res.status(500).json({ 
+    error: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
 });
 
 const server = http.createServer(app);
@@ -94,15 +144,31 @@ let startPromise = null;
 
 function listenOnce(port) {
   return new Promise((resolve, reject) => {
+    console.log('[SERVER] Starting on port:', port);
+    
     const onErr = (err) => {
+      console.error('[SERVER] Error:', err);
       server.removeListener('error', onErr);
+      server.removeListener('listening', onListen);
       reject(err);
     };
-    server.once('error', onErr);
-    server.listen(port, () => {
+    
+    const onListen = () => {
+      console.log('[SERVER] Successfully listening on port:', port);
       server.removeListener('error', onErr);
-      resolve(port);
-    });
+      server.removeListener('listening', onListen);
+      resolve();
+    };
+    
+    server.once('error', onErr);
+    server.once('listening', onListen);
+    
+    try {
+      server.listen(port, '127.0.0.1');
+    } catch (error) {
+      console.error('[SERVER] Listen error:', error);
+      onErr(error);
+    }
   });
 }
 

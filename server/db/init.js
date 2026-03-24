@@ -84,43 +84,63 @@ function wrapDb(db) {
      * @param {string} sql
      */
     prepare(sql) {
-      return {
-        run(...params) {
-          if (params.length) db.run(sql, params);
-          else db.run(sql);
-          // Must read last_insert_rowid BEFORE persist() — sql.js export() resets it to 0.
-          let lastInsertRowid = 0;
-          if (/^\s*INSERT/i.test(sql)) {
-            const r = db.exec('SELECT last_insert_rowid() AS id');
-            lastInsertRowid = r[0]?.values[0]?.[0] ?? 0;
-          }
-          persist();
-          return { lastInsertRowid };
-        },
-        get(...params) {
-          const stmt = db.prepare(sql);
-          try {
-            if (params.length) stmt.bind(params);
-            if (!stmt.step()) return undefined;
-            return stmt.getAsObject();
-          } finally {
-            stmt.free();
-          }
-        },
-        all(...params) {
-          const stmt = db.prepare(sql);
-          const rows = [];
-          try {
-            if (params.length) stmt.bind(params);
-            while (stmt.step()) {
-              rows.push(stmt.getAsObject());
+      try {
+        return {
+          run(...params) {
+            try {
+              if (params.length) db.run(sql, params);
+              else db.run(sql);
+              // Must read last_insert_rowid BEFORE persist() — sql.js export() resets it to 0.
+              let lastInsertRowid = 0;
+              if (/^\s*INSERT/i.test(sql)) {
+                const r = db.exec('SELECT last_insert_rowid() AS id');
+                lastInsertRowid = r[0]?.values[0]?.[0] ?? 0;
+              }
+              persist();
+              return { lastInsertRowid };
+            } catch (error) {
+              console.error('[DB] Query run error:', { sql, params, error });
+              throw new Error(`Database run error: ${error.message}`);
             }
-            return rows;
-          } finally {
-            stmt.free();
-          }
-        },
-      };
+          },
+          get(...params) {
+            try {
+              const stmt = db.prepare(sql);
+              try {
+                if (params.length) stmt.bind(params);
+                if (!stmt.step()) return undefined;
+                return stmt.getAsObject();
+              } finally {
+                stmt.free();
+              }
+            } catch (error) {
+              console.error('[DB] Query get error:', { sql, params, error });
+              throw new Error(`Database get error: ${error.message}`);
+            }
+          },
+          all(...params) {
+            try {
+              const stmt = db.prepare(sql);
+              const rows = [];
+              try {
+                if (params.length) stmt.bind(params);
+                while (stmt.step()) {
+                  rows.push(stmt.getAsObject());
+                }
+                return rows;
+              } finally {
+                stmt.free();
+              }
+            } catch (error) {
+              console.error('[DB] Query all error:', { sql, params, error });
+              throw new Error(`Database all error: ${error.message}`);
+            }
+          },
+        };
+      } catch (error) {
+        console.error('[DB] Prepare error:', { sql, error });
+        throw new Error(`Database prepare error: ${error.message}`);
+      }
     },
   };
 }
@@ -160,11 +180,25 @@ function getDb() {
  * Ensure configured admin usernames always have admin + verified flags in DB.
  */
 function seedAdmin() {
-  const db = getDb();
-  const adminNames = config.getAdminUsernames();
-  adminNames.forEach(name => {
-    db.prepare('UPDATE users SET is_admin = 1, is_verified = 1 WHERE lower(username) = ?').run(name);
-  });
+  try {
+    console.log('[DB] Seeding admin users...');
+    const db = getDb();
+    const adminNames = config.getAdminUsernames();
+    console.log('[DB] Admin usernames:', adminNames);
+    
+    adminNames.forEach(name => {
+      try {
+        const result = db.prepare('UPDATE users SET is_admin = 1, is_verified = 1 WHERE lower(username) = ?').run(name);
+        console.log(`[DB] Updated admin ${name}:`, result.changes, 'rows affected');
+      } catch (error) {
+        console.error(`[DB] Failed to update admin ${name}:`, error);
+      }
+    });
+    
+    console.log('[DB] Admin seeding completed');
+  } catch (error) {
+    console.error('[DB] Error in seedAdmin:', error);
+  }
 }
 
 module.exports = { initDb, getDb, seedAdmin };
