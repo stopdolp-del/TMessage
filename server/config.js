@@ -34,6 +34,12 @@ function setRuntimePort(p) {
   process.env.TMESSING_PUBLIC_PORT = String(p);
 }
 
+/** Admin usernames (case-insensitive) */
+const adminUsernames = [
+  (process.env.ADMIN_USERNAME_1 || 'stopdolp').toLowerCase(),
+  (process.env.ADMIN_USERNAME_2 || 'amarko132').toLowerCase()
+];
+
 module.exports = {
   get port() {
     return runtimePort;
@@ -41,8 +47,15 @@ module.exports = {
   setRuntimePort,
   jwtSecret: process.env.JWT_SECRET || 'dev-only-change-me',
   nodeEnv: process.env.NODE_ENV || 'development',
-  /** First account with this username becomes admin (case-insensitive). */
-  adminUsername: (process.env.ADMIN_USERNAME || 'amarko132').toLowerCase(),
+  /** Check if user is admin */
+  isAdmin(username) {
+    if (!username) return false;
+    return adminUsernames.includes(username.toLowerCase());
+  },
+  /** Get all admin usernames */
+  getAdminUsernames() {
+    return [...adminUsernames];
+  },
   databasePath: resolveDatabasePath(),
   uploadsPath: resolveUploadsPath(),
   root: ROOT,

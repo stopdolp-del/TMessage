@@ -157,12 +157,14 @@ function getDb() {
 }
 
 /**
- * Ensure configured admin username always has admin + verified flags in DB.
+ * Ensure configured admin usernames always have admin + verified flags in DB.
  */
 function seedAdmin() {
   const db = getDb();
-  const name = config.adminUsername;
-  db.prepare('UPDATE users SET is_admin = 1, is_verified = 1 WHERE lower(username) = ?').run(name);
+  const adminNames = config.getAdminUsernames();
+  adminNames.forEach(name => {
+    db.prepare('UPDATE users SET is_admin = 1, is_verified = 1 WHERE lower(username) = ?').run(name);
+  });
 }
 
 module.exports = { initDb, getDb, seedAdmin };

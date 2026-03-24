@@ -1456,19 +1456,197 @@ html[data-theme='light'] .msg.own .who {
   color: #fff;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Admin Panel Styles */
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
 }
 
-.chat-item,
-.msg,
-.modal {
+.admin-tab {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius) var(--radius) 0 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.admin-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.admin-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-bottom: 2px solid var(--accent);
+}
+
+.admin-tab-content {
+  min-height: 300px;
+}
+
+.admin-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.admin-controls input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.admin-controls input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.admin-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.admin-user-item, .admin-message-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   animation: fadeIn 0.2s ease;
+}
+
+.admin-user-item:last-child, .admin-message-item:last-child {
+  border-bottom: none;
+}
+
+.admin-user-item:hover, .admin-message-item:hover {
+  background: var(--bg-hover);
+}
+
+.admin-user-info, .admin-message-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-user-name, .admin-message-sender {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.admin-user-details, .admin-message-content {
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.admin-user-banned {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.admin-user-admin {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.admin-btn {
+  padding: 4px 12px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.admin-btn.ban {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.admin-btn.ban:hover {
+  background: rgba(255, 107, 107, 0.25);
+}
+
+.admin-btn.unban {
+  background: rgba(42, 132, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(42, 132, 255, 0.3);
+}
+
+.admin-btn.unban:hover {
+  background: rgba(42, 132, 255, 0.25);
+}
+
+.admin-message-time {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.admin-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.admin-badge.banned {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--danger);
+}
+
+.admin-badge.admin {
+  background: rgba(42, 132, 255, 0.15);
+  color: var(--accent);
+}
+
+@media (max-width: 768px) {
+  .admin-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .admin-controls input {
+    margin-bottom: 8px;
+  }
+  
+  .admin-actions {
+    flex-direction: column;
+  }
+  
+  .admin-btn {
+    width: 100%;
+    margin-bottom: 4px;
+  }
 }

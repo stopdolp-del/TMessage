@@ -210,18 +210,30 @@
           <button type="button" class="btn ghost modal-close">Close</button>
         </div>
         <div class="modal hidden" id="modal-admin">
-          <h3>Admin</h3>
-          <p class="muted small">Ban user ID, delete message ID, delete chat ID.</p>
-          <label>Ban user ID <input type="number" id="admin-ban-id" /></label>
-          <button type="button" id="admin-ban" class="btn danger">Ban</button>
-          <button type="button" id="admin-unban" class="btn ghost">Unban</button>
-          <label>Ban by username <input type="text" id="admin-ban-username" placeholder="Enter username" /></label>
-          <button type="button" id="admin-ban-username-btn" class="btn danger">Ban User</button>
-          <button type="button" id="admin-unban-username-btn" class="btn ghost">Unban User</button>
-          <label>Delete message ID <input type="number" id="admin-msg-id" /></label>
-          <button type="button" id="admin-del-msg" class="btn danger">Delete message</button>
-          <label>Delete chat ID <input type="number" id="admin-chat-id" /></label>
-          <button type="button" id="admin-del-chat" class="btn danger">Delete chat</button>
+          <h3>🛡️ Admin Panel</h3>
+          <div class="admin-tabs">
+            <button type="button" class="admin-tab active" data-tab="users">Users</button>
+            <button type="button" class="admin-tab" data-tab="messages">Messages</button>
+          </div>
+          
+          <!-- Users Tab -->
+          <div id="admin-users-tab" class="admin-tab-content">
+            <div class="admin-controls">
+              <input type="text" id="admin-user-search" placeholder="Search users..." />
+              <button type="button" id="admin-refresh-users" class="btn primary">Refresh</button>
+            </div>
+            <div id="admin-users-list" class="admin-list"></div>
+          </div>
+          
+          <!-- Messages Tab -->
+          <div id="admin-messages-tab" class="admin-tab-content hidden">
+            <div class="admin-controls">
+              <button type="button" id="admin-refresh-messages" class="btn primary">Refresh</button>
+              <span id="admin-message-count" class="muted"></span>
+            </div>
+            <div id="admin-messages-list" class="admin-list"></div>
+          </div>
+          
           <button type="button" class="btn ghost modal-close">Close</button>
         </div>
       </div>

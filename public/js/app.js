@@ -233,6 +233,12 @@ async function refreshMe() {
   me = user;
   const tu = $('#top-user');
   if (tu) tu.textContent = user.username ? `@${user.username}` : '';
+  
+  // Add admin badge if user is admin
+  if (tu && user.is_admin) {
+    tu.innerHTML = `@${user.username} <span class="admin-badge admin">🛡️</span>`;
+  }
+  
   $('#btn-admin')?.classList.toggle('hidden', !user.is_admin);
   return user;
 }
@@ -679,6 +685,12 @@ function removeMessage(chatId, messageId) {
 function onSocketEvent(data) {
   if (data.type === 'new_message' && data.message) {
     appendMessage(data.chatId, data.message);
+    
+    // Update admin messages if panel is open and user is admin
+    if (me?.is_admin && !$('#admin-messages-tab')?.classList.contains('hidden')) {
+      adminMessages.unshift(data.message);
+      renderAdminMessages({ total: adminMessages.length + 1, hasMore: true });
+    }
     return;
   }
   if (data.type === 'message_edited' && data.message) {
@@ -702,7 +714,7 @@ function onSocketEvent(data) {
     const text = $('#typing-text');
     if (bar && text) {
       bar.classList.toggle('hidden', !data.isTyping);
-      text.textContent = data.isTyping ? `${escapeHtml(data.username || 'Someone')} is typing…` : '';
+      text.textContent = data.isTyping ? `${chatLabelForId(data.chatId)} is typing…` : '';
     }
     return;
   }
@@ -725,7 +737,7 @@ function onSocketEvent(data) {
         hideIncomingSheet();
       }
       if (voiceSession && callChatId === cid) {
-        endVoice(true);
+        endVoice();
       }
       return;
     }
@@ -733,7 +745,7 @@ function onSocketEvent(data) {
     if (data.signalType === 'decline' && data.fromUserId !== me?.id) {
       if (voiceSession && callChatId === cid) {
         setCallStatus('Declined');
-        setTimeout(() => endVoice(true), 600);
+        setTimeout(() => endVoice(), 600);
       }
       return;
     }
@@ -1660,56 +1672,201 @@ $('#btn-admin')?.addEventListener('click', () => {
   $('#modal-admin')?.classList.remove('hidden');
 });
 
-$('#admin-ban')?.addEventListener('click', async () => {
-  const id = Number($('#admin-ban-id')?.value);
-  if (!id) return;
-  try {
-    await api(`/admin/users/${id}/ban`, { method: 'POST', body: JSON.stringify({ banned: true }) });
-    alert('Banned');
-  } catch (err) {
-    alert(err.data?.error || err.message);
-  }
-});
+// Admin Panel Functions
+let adminUsers = [];
+let adminMessages = [];
+let adminMessageOffset = 0;
 
-$('#admin-unban')?.addEventListener('click', async () => {
-  const id = Number($('#admin-ban-id')?.value);
-  if (!id) return;
+async function loadAdminUsers() {
   try {
-    await api(`/admin/users/${id}/ban`, { method: 'POST', body: JSON.stringify({ banned: false }) });
-    alert('Unbanned');
-  } catch (err) {
-    alert(err.data?.error || err.message);
+    const users = await api('/admin/users');
+    adminUsers = users;
+    renderAdminUsers();
+  } catch (error) {
+    console.error('Failed to load admin users:', error);
+    showToast('Failed to load users');
   }
-});
+}
 
-$('#admin-ban-username-btn')?.addEventListener('click', async () => {
-  const username = String($('#admin-ban-username')?.value || '').trim();
-  if (!username) return;
+async function loadAdminMessages(offset = 0) {
   try {
-    const result = await api(`/admin/users/ban-by-username`, { 
-      method: 'POST', 
-      body: JSON.stringify({ username, banned: true }) 
+    const response = await api(`/admin/messages?limit=50&offset=${offset}`);
+    if (offset === 0) {
+      adminMessages = response.messages;
+    } else {
+      adminMessages = [...adminMessages, ...response.messages];
+    }
+    renderAdminMessages(response.pagination);
+  } catch (error) {
+    console.error('Failed to load admin messages:', error);
+    showToast('Failed to load messages');
+  }
+}
+
+function renderAdminUsers() {
+  const container = $('#admin-users-list');
+  if (!container) return;
+  
+  const searchTerm = $('#admin-user-search')?.value.toLowerCase() || '';
+  const filteredUsers = adminUsers.filter(user => 
+    user.username.toLowerCase().includes(searchTerm)
+  );
+  
+  const frag = document.createDocumentFragment();
+  filteredUsers.forEach(user => {
+    const item = document.createElement('div');
+    item.className = 'admin-user-item';
+    
+    const badges = [];
+    if (user.is_admin) badges.push('<span class="admin-badge admin">🛡️ Admin</span>');
+    if (user.is_banned) badges.push('<span class="admin-badge banned">🚫 Banned</span>');
+    
+    item.innerHTML = `
+      <div class="admin-user-info">
+        <div class="admin-user-name">${escapeHtml(user.username)}${badges.join('')}</div>
+        <div class="admin-user-details">
+          ID: ${user.id} | Joined: ${new Date(user.created_at * 1000).toLocaleDateString()}
+        </div>
+      </div>
+      <div class="admin-actions">
+        ${user.is_banned ? 
+          `<button class="admin-btn unban" data-username="${user.username}">Unban</button>` :
+          `<button class="admin-btn ban" data-username="${user.username}">Ban</button>`
+        }
+      </div>
+    `;
+    
+    // Add event listeners
+    const banBtn = item.querySelector('.ban');
+    const unbanBtn = item.querySelector('.unban');
+    
+    if (banBtn) {
+      banBtn.addEventListener('click', () => banUser(user.username));
+    }
+    if (unbanBtn) {
+      unbanBtn.addEventListener('click', () => unbanUser(user.username));
+    }
+    
+    frag.appendChild(item);
+  });
+  
+  container.innerHTML = '';
+  container.appendChild(frag);
+}
+
+function renderAdminMessages(pagination) {
+  const container = $('#admin-messages-list');
+  if (!container) return;
+  
+  const frag = document.createDocumentFragment();
+  adminMessages.forEach(msg => {
+    const item = document.createElement('div');
+    item.className = 'admin-message-item';
+    
+    item.innerHTML = `
+      <div class="admin-message-info">
+        <div class="admin-message-sender">${escapeHtml(msg.sender_username)}</div>
+        <div class="admin-message-content">${escapeHtml(msg.body || (msg.file_name ? '📎 ' + msg.file_name : '📎 Attachment'))}</div>
+        <div class="admin-message-time">${new Date(msg.created_at * 1000).toLocaleString()}</div>
+      </div>
+    `;
+    
+    frag.appendChild(item);
+  });
+  
+  container.innerHTML = '';
+  container.appendChild(frag);
+  
+  // Update count
+  const countEl = $('#admin-message-count');
+  if (countEl) {
+    countEl.textContent = `Showing ${adminMessages.length} of ${pagination.total} messages`;
+  }
+  
+  // Add load more button if needed
+  if (pagination.hasMore) {
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.className = 'btn primary';
+    loadMoreBtn.textContent = 'Load More';
+    loadMoreBtn.style.marginTop = '12px';
+    loadMoreBtn.addEventListener('click', () => {
+      adminMessageOffset = adminMessages.length;
+      loadAdminMessages(adminMessageOffset);
     });
-    alert(`Banned user: ${result.user.username} (ID: ${result.user.id})`);
-    $('#admin-ban-username').value = '';
-  } catch (err) {
-    alert(err.data?.error || err.message);
+    container.appendChild(loadMoreBtn);
   }
+}
+
+async function banUser(username) {
+  if (!confirm(`Ban user "${username}"?`)) return;
+  
+  try {
+    const reason = prompt('Ban reason (optional):');
+    await api('/admin/ban', {
+      method: 'POST',
+      body: JSON.stringify({ username, reason: reason || undefined })
+    });
+    showToast(`User "${username}" banned`);
+    await loadAdminUsers();
+  } catch (error) {
+    console.error('Failed to ban user:', error);
+    showToast(error.data?.error || 'Failed to ban user');
+  }
+}
+
+async function unbanUser(username) {
+  if (!confirm(`Unban user "${username}"?`)) return;
+  
+  try {
+    await api('/admin/unban', {
+      method: 'POST',
+      body: JSON.stringify({ username })
+    });
+    showToast(`User "${username}" unbanned`);
+    await loadAdminUsers();
+  } catch (error) {
+    console.error('Failed to unban user:', error);
+    showToast(error.data?.error || 'Failed to unban user');
+  }
+}
+
+// Admin tab switching
+function switchAdminTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('.admin-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.tab === tabName);
+  });
+  
+  // Update tab content
+  document.querySelectorAll('.admin-tab-content').forEach(content => {
+    content.classList.add('hidden');
+  });
+  document.getElementById(`admin-${tabName}-tab`)?.classList.remove('hidden');
+  
+  // Load data if needed
+  if (tabName === 'users' && adminUsers.length === 0) {
+    loadAdminUsers();
+  } else if (tabName === 'messages' && adminMessages.length === 0) {
+    loadAdminMessages();
+  }
+}
+
+// Admin Panel Event Listeners
+document.querySelectorAll('.admin-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    switchAdminTab(tab.dataset.tab);
+  });
 });
 
-$('#admin-unban-username-btn')?.addEventListener('click', async () => {
-  const username = String($('#admin-ban-username')?.value || '').trim();
-  if (!username) return;
-  try {
-    const result = await api(`/admin/users/ban-by-username`, { 
-      method: 'POST', 
-      body: JSON.stringify({ username, banned: false }) 
-    });
-    alert(`Unbanned user: ${result.user.username} (ID: ${result.user.id})`);
-    $('#admin-ban-username').value = '';
-  } catch (err) {
-    alert(err.data?.error || err.message);
-  }
+$('#admin-refresh-users')?.addEventListener('click', loadAdminUsers);
+
+$('#admin-refresh-messages')?.addEventListener('click', () => {
+  adminMessageOffset = 0;
+  loadAdminMessages();
+});
+
+$('#admin-user-search')?.addEventListener('input', () => {
+  renderAdminUsers();
 });
 
 $('#admin-del-msg')?.addEventListener('click', async () => {
