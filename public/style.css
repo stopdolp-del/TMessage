@@ -814,18 +814,72 @@ body {
 
 .emoji-pop {
   position: absolute;
-  bottom: 58px;
-  left: 52px;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  z-index: 20;
-  max-width: 240px;
+  padding: 12px;
+  margin-bottom: 8px;
   box-shadow: var(--shadow-md);
+  z-index: 10;
+}
+
+.emoji-picker-header {
+  margin-bottom: 12px;
+}
+
+.emoji-picker-header input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.emoji-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.emoji-category-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.emoji-pick {
+  background: transparent;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  transition: background-color 0.15s ease;
+}
+
+.emoji-pick:hover {
+  background: var(--bg-hover);
+}
+
+.emoji-pick:active {
+  background: var(--accent-soft);
 }
 
 .emoji-pop button {
@@ -1296,7 +1350,7 @@ body {
   }
 
   #main-layout:not(.mobile-chat-open) .chat-main {
-    display: none !important;
+    display: none;
   }
 
   #main-layout.mobile-chat-open .btn-back-chats {
@@ -1333,6 +1387,9 @@ body {
     flex: 1;
     min-height: 0;
     -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    will-change: scroll-position;
+    contain: layout style paint;
   }
 
   .composer {

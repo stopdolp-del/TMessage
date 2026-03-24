@@ -56,7 +56,18 @@ let recordHoldTimer = null;
 let recordLongPressStarted = false;
 
 const $ = (sel) => document.querySelector(sel);
-const EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🎉', '👏'];
+const EMOJIS = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃',
+  '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙',
+  '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+  '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
+  '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮',
+  '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉',
+  '👆', '👇', '☝️', '✋', '🤚', '🖐️', '🖖', '👋', '🤙', '💪',
+  '❤️', '🧡', '💛', '�', '�', '💜', '🖤', '🤍', '🤎', '�',
+  '🔥', '�', '✨', '🎉', '🎊', '🎈', '🎁', '🎀', '🎗️', '🎟️',
+  '🎵', '🎶', '🎤', '🎧', '�', '🎸', '🥁', '🎹', '🎺', '🎻'
+];
 
 function isMobileLayout() {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
@@ -153,14 +164,14 @@ function scheduleReceiptReload() {
   clearTimeout(receiptReloadTimer);
   receiptReloadTimer = setTimeout(() => {
     if (activeChatId) loadMessages(activeChatId).catch(() => {});
-  }, 350);
+  }, 500); // Increased delay for better performance
 }
 
 function queueDeliveredAck(messageId) {
   if (!messageId || !me) return;
   deliveredPending.add(messageId);
   clearTimeout(deliveredFlushTimer);
-  deliveredFlushTimer = setTimeout(flushDeliveredAcks, 160);
+  deliveredFlushTimer = setTimeout(flushDeliveredAcks, 250); // Increased batch delay for better performance
 }
 
 function flushDeliveredAcks() {
@@ -175,7 +186,7 @@ function scheduleChatListRender() {
   clearTimeout(chatListRenderTimer);
   chatListRenderTimer = setTimeout(() => {
     renderChatList($('#chat-search')?.value || '');
-  }, 80);
+  }, 120); // Increased debounce time for better performance
 }
 
 function showScreen(id) {
@@ -869,19 +880,48 @@ async function runVoiceClip() {
   if (!activeChatId) return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
+    const options = { mimeType: 'audio/webm;codecs=opus' };
+    let mediaRecorder;
+    
+    try {
+      mediaRecorder = new MediaRecorder(stream, options);
+    } catch (e) {
+      // Fallback to default mimeType if opus not supported
+      mediaRecorder = new MediaRecorder(stream);
+    }
+    
     const chunks = [];
-    mediaRecorder.ondataavailable = (ev) => chunks.push(ev.data);
+    mediaRecorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) {
+        chunks.push(ev.data);
+      }
+    };
     mediaRecorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
+      if (chunks.length === 0) {
+        showToast('Voice recording failed - no data captured');
+        return;
+      }
       const blob = new Blob(chunks, { type: 'audio/webm' });
       const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
       await sendCurrentMessage('', file);
+      showToast('Voice message sent');
     };
-    mediaRecorder.start();
-    setTimeout(() => mediaRecorder?.stop(), 4000);
-  } catch {
-    alert('Microphone not available');
+    mediaRecorder.onerror = (event) => {
+      console.error('MediaRecorder error:', event.error);
+      showToast('Voice recording failed');
+      stream.getTracks().forEach((t) => t.stop());
+    };
+    
+    mediaRecorder.start(100); // Collect data every 100ms
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+    }, 4000);
+  } catch (error) {
+    console.error('Voice recording error:', error);
+    showToast('Microphone not available or permission denied');
   }
 }
 
@@ -1012,15 +1052,58 @@ $('#btn-emoji')?.addEventListener('click', () => {
   const pop = $('#emoji-pop');
   if (!pop) return;
   if (pop.classList.contains('hidden')) {
-    pop.innerHTML = EMOJIS.map((e) => `<button type="button" class="emoji-pick">${e}</button>`).join('');
+    const categories = {
+      'Smileys': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙'],
+      'Expressions': ['😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥'],
+      'Neutral': ['😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮'],
+      'Gestures': ['👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚', '🖐️', '🖖', '👋', '💪'],
+      'Hearts': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔'],
+      'Celebration': ['🔥', '💯', '✨', '🎉', '🎊', '🎈', '🎁', '🎀', '🎗️', '🎟️'],
+      'Music': ['🎵', '🎶', '🎤', '🎧', '📻', '🎸', '🥁', '🎹', '🎺', '🎻']
+    };
+    
+    let html = '<div class="emoji-picker-header"><input type="search" id="emoji-search" placeholder="Search emojis..." /></div>';
+    html += '<div class="emoji-categories">';
+    
+    Object.entries(categories).forEach(([category, emojis]) => {
+      html += `<div class="emoji-category">
+        <div class="emoji-category-title">${category}</div>
+        <div class="emoji-grid">${emojis.map(e => `<button type="button" class="emoji-pick">${e}</button>`).join('')}</div>
+      </div>`;
+    });
+    
+    html += '</div>';
+    pop.innerHTML = html;
+    
+    // Add search functionality
+    const searchInput = pop.querySelector('#emoji-search');
+    searchInput?.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase();
+      const allEmojis = pop.querySelectorAll('.emoji-pick');
+      
+      allEmojis.forEach(emoji => {
+        const emojiText = emoji.textContent;
+        const isVisible = query === '' || emojiText.includes(query);
+        emoji.parentElement.style.display = isVisible ? '' : 'none';
+      });
+      
+      // Show/hide categories based on visible emojis
+      pop.querySelectorAll('.emoji-category').forEach(category => {
+        const visibleEmojis = category.querySelectorAll('.emoji-pick[style=""], .emoji-pick:not([style])');
+        category.style.display = visibleEmojis.length > 0 ? '' : 'none';
+      });
+    });
+    
     pop.querySelectorAll('.emoji-pick').forEach((b) => {
       b.addEventListener('click', () => {
         const inp = $('#msg-input');
-        if (inp) inp.value += b.textContent;
+        if (inp) {
+          inp.value += b.textContent;
+          inp.focus();
+        }
         pop.classList.add('hidden');
       });
     });
-    pop.classList.remove('hidden');
   } else pop.classList.add('hidden');
 });
 
@@ -1068,7 +1151,12 @@ $('#btn-voice')?.addEventListener('click', async () => {
       (stream) => {
         setCallStatus('Connected');
         const ra = $('#remote-audio');
-        if (ra) ra.srcObject = stream;
+        if (ra) {
+          ra.srcObject = stream;
+          ra.play().catch(() => {
+            // Autoplay was prevented, will play on user interaction
+          });
+        }
       },
       () => endVoice(),
       'audio',
@@ -1100,9 +1188,19 @@ $('#btn-video')?.addEventListener('click', async () => {
       (stream) => {
         setCallStatus('Connected');
         const rv = $('#remote-video');
+        const ra = $('#remote-audio');
         if (rv) {
           rv.srcObject = stream;
           rv.muted = false;
+          rv.play().catch(() => {
+            // Autoplay was prevented, will play on user interaction
+          });
+        }
+        if (ra) {
+          ra.srcObject = stream;
+          ra.play().catch(() => {
+            // Autoplay was prevented, will play on user interaction
+          });
         }
       },
       () => endVoice(),
@@ -1171,8 +1269,14 @@ $('#btn-call-accept')?.addEventListener('click', async () => {
         if (kind === 'video' && rv) {
           rv.srcObject = stream;
           rv.muted = false;
+          rv.play().catch(() => {
+            // Autoplay was prevented, will play on user interaction
+          });
         } else if (ra) {
           ra.srcObject = stream;
+          ra.play().catch(() => {
+            // Autoplay was prevented, will play on user interaction
+          });
         }
       },
       () => endVoice(),
@@ -1492,6 +1596,36 @@ $('#admin-unban')?.addEventListener('click', async () => {
   try {
     await api(`/admin/users/${id}/ban`, { method: 'POST', body: JSON.stringify({ banned: false }) });
     alert('Unbanned');
+  } catch (err) {
+    alert(err.data?.error || err.message);
+  }
+});
+
+$('#admin-ban-username-btn')?.addEventListener('click', async () => {
+  const username = String($('#admin-ban-username')?.value || '').trim();
+  if (!username) return;
+  try {
+    const result = await api(`/admin/users/ban-by-username`, { 
+      method: 'POST', 
+      body: JSON.stringify({ username, banned: true }) 
+    });
+    alert(`Banned user: ${result.user.username} (ID: ${result.user.id})`);
+    $('#admin-ban-username').value = '';
+  } catch (err) {
+    alert(err.data?.error || err.message);
+  }
+});
+
+$('#admin-unban-username-btn')?.addEventListener('click', async () => {
+  const username = String($('#admin-ban-username')?.value || '').trim();
+  if (!username) return;
+  try {
+    const result = await api(`/admin/users/ban-by-username`, { 
+      method: 'POST', 
+      body: JSON.stringify({ username, banned: false }) 
+    });
+    alert(`Unbanned user: ${result.user.username} (ID: ${result.user.id})`);
+    $('#admin-ban-username').value = '';
   } catch (err) {
     alert(err.data?.error || err.message);
   }

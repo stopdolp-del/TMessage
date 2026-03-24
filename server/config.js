@@ -42,7 +42,7 @@ module.exports = {
   jwtSecret: process.env.JWT_SECRET || 'dev-only-change-me',
   nodeEnv: process.env.NODE_ENV || 'development',
   /** First account with this username becomes admin (case-insensitive). */
-  adminUsername: (process.env.ADMIN_USERNAME || 'stopdolp').toLowerCase(),
+  adminUsername: (process.env.ADMIN_USERNAME || 'amarko132').toLowerCase(),
   databasePath: resolveDatabasePath(),
   uploadsPath: resolveUploadsPath(),
   root: ROOT,

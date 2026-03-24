@@ -34,6 +34,22 @@ router.post(
   }
 );
 
+router.post(
+  '/users/ban-by-username',
+  [body('username').trim().isLength({ min: 1 }), body('banned').isBoolean()],
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const { username, banned } = req.body;
+    const db = getDb();
+    const u = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    if (u.id === req.user.id) return res.status(400).json({ error: 'Cannot ban yourself' });
+    db.prepare('UPDATE users SET is_banned = ? WHERE id = ?').run(banned ? 1 : 0, u.id);
+    res.json({ ok: true, user: { id: u.id, username: u.username, banned } });
+  }
+);
+
 router.delete('/messages/:messageId', (req, res) => {
   const messageId = Number(req.params.messageId);
   const db = getDb();
