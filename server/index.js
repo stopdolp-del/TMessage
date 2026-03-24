@@ -164,7 +164,7 @@ function listenOnce(port) {
     server.once('listening', onListen);
     
     try {
-      server.listen(port, '127.0.0.1');
+      server.listen(port, '0.0.0.0', () => {
     } catch (error) {
       console.error('[SERVER] Listen error:', error);
       onErr(error);
