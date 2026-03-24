@@ -15,7 +15,11 @@ function buildIceServers() {
 }
 
 function rtcConfig() {
-  return { iceServers: buildIceServers(), iceCandidatePoolSize: 10 };
+  return { 
+    iceServers: buildIceServers(), 
+    iceCandidatePoolSize: 10,
+    sdpSemantics: 'unified-plan'
+  };
 }
 
 function attachIce(ws, chatId, pc, media) {

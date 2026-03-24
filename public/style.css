@@ -434,6 +434,9 @@ body {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
+  will-change: scroll-position;
+  contain: layout style paint;
+  transform: translateZ(0);
 }
 
 .msg {

@@ -164,7 +164,7 @@ function scheduleReceiptReload() {
   clearTimeout(receiptReloadTimer);
   receiptReloadTimer = setTimeout(() => {
     if (activeChatId) loadMessages(activeChatId).catch(() => {});
-  }, 500); // Increased delay for better performance
+  }, 800); // Further increased for better performance
 }
 
 function queueDeliveredAck(messageId) {
@@ -186,7 +186,7 @@ function scheduleChatListRender() {
   clearTimeout(chatListRenderTimer);
   chatListRenderTimer = setTimeout(() => {
     renderChatList($('#chat-search')?.value || '');
-  }, 120); // Increased debounce time for better performance
+  }, 200); // Further increased for better performance
 }
 
 function showScreen(id) {
@@ -257,7 +257,10 @@ function renderChatList(filter = '') {
   const ul = $('#chat-list');
   if (!ul) return;
   const q = filter.toLowerCase();
-  ul.innerHTML = '';
+  
+  // Use DocumentFragment for better performance
+  const frag = document.createDocumentFragment();
+  
   chats
     .filter((c) => !q || (c.name || '').toLowerCase().includes(q))
     .forEach((c) => {
@@ -275,6 +278,8 @@ function renderChatList(filter = '') {
         unread > 0
           ? `<span class="unread-badge">${unread > 99 ? '99+' : unread}</span>`
           : '';
+      
+      // Single innerHTML call for performance
       li.innerHTML = `
         <img class="avatar" alt="" src="${avatar ? assetBase() + avatar : ''}" />
         <div class="meta">
@@ -284,8 +289,12 @@ function renderChatList(filter = '') {
         ${badge}
       `;
       li.addEventListener('click', () => selectChat(c.id));
-      ul.appendChild(li);
+      frag.appendChild(li);
     });
+  
+  // Replace all content at once
+  ul.innerHTML = '';
+  ul.appendChild(frag);
 }
 
 function escapeHtml(s) {
@@ -423,9 +432,13 @@ function buildMessageElement(m) {
   const div = document.createElement('div');
   div.className = 'msg' + (own ? ' own' : '');
   div.dataset.id = String(m.id);
+  div.dataset.msgId = String(m.id); // For message tracking
+
   const badge = m.is_admin ? ' <span class="badge" title="Admin">✔</span>' : '';
   const isVideoNote = !!(m.video_note && m.file_path && m.file_mime?.startsWith('video/'));
   let bodyHtml = escapeHtml(m.body || '');
+
+  // Cache processed body to avoid reprocessing
   if (m.forward_from_label) {
     bodyHtml = `<div class="forward-hint">↪ ${escapeHtml(m.forward_from_label)}</div>` + bodyHtml;
   }
@@ -449,10 +462,11 @@ function buildMessageElement(m) {
       m.file_name || 'File'
     )}</a>`;
   }
+
   const edited = m.edited_at ? ' <span class="edited">(edited)</span>' : '';
   const reacts = (m.reactions || [])
     .map((r) => `<span class="react" data-emoji="${r.emoji}">${r.emoji}</span>`)
-    .join(' ');
+    .join('');
   const reactBar = `<div class="react-row">${EMOJIS.map((e) => `<button type="button" class="react-add" data-e="${e}">${e}</button>`).join('')} ${reacts}</div>`;
   const actions = own
     ? `<button type="button" class="msg-act" data-act="edit">Edit</button>
@@ -460,6 +474,8 @@ function buildMessageElement(m) {
     : '';
   const ticks = own ? receiptLabel(m) : '';
   const timeStr = formatMessageTime(m.created_at);
+
+  // Use innerHTML only once for better performance
   div.innerHTML = `
       <div class="msg-head">
         <span class="who">${escapeHtml(m.username)}${badge}</span>
@@ -469,10 +485,12 @@ function buildMessageElement(m) {
       </div>
       <div class="body">${bodyHtml}${edited}</div>
       <div class="msg-footer">
-        <span class="msg-time">${escapeHtml(timeStr)}</span>${ticks}
+        <span class="msg-time">${timeStr}</span>
+        ${ticks}
       </div>
       ${reactBar}
     `;
+
   div.querySelectorAll('.react-add').forEach((btn) => {
     btn.addEventListener('click', () => toggleReaction(m.id, btn.getAttribute('data-e')));
   });
@@ -543,10 +561,27 @@ function renderMessages(chatId) {
   const box = $('#messages');
   if (!box) return;
   const list = messagesByChat[chatId] || [];
-  box.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  list.forEach((m) => frag.appendChild(buildMessageElement(m)));
-  box.appendChild(frag);
+  
+  // Only render if chat is active and messages have changed
+  if (chatId !== activeChatId) return;
+  
+  // Clear only if completely different chat
+  const currentCount = box.children.length;
+  if (currentCount === 0 || Math.abs(currentCount - list.length) > 5) {
+    box.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    list.forEach((m) => frag.appendChild(buildMessageElement(m)));
+    box.appendChild(frag);
+  } else {
+    // Append only new messages
+    const lastMsgId = box.lastElementChild?.dataset.msgId;
+    const newMessages = lastMsgId ? list.filter(m => m.id > parseInt(lastMsgId)) : list;
+    if (newMessages.length > 0) {
+      const frag = document.createDocumentFragment();
+      newMessages.forEach((m) => frag.appendChild(buildMessageElement(m)));
+      box.appendChild(frag);
+    }
+  }
   scrollMessagesToBottom(box);
 }
 
@@ -1153,17 +1188,28 @@ $('#btn-voice')?.addEventListener('click', async () => {
         const ra = $('#remote-audio');
         if (ra) {
           ra.srcObject = stream;
-          ra.play().catch(() => {
-            // Autoplay was prevented, will play on user interaction
-          });
+          ra.muted = false;
+          // Force play with user interaction fallback
+          const playPromise = ra.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              // Add click handler to play audio
+              document.addEventListener('click', function playAudio() {
+                ra.play();
+                document.removeEventListener('click', playAudio);
+              }, { once: true });
+            });
+          }
         }
       },
       () => endVoice(),
       'audio',
       null
     );
-  } catch {
-    endVoice();
+  } catch (error) {
+    console.error('Voice call error:', error);
+    setCallStatus('Failed');
+    setTimeout(endVoice, 2000);
   }
 });
 
@@ -1192,15 +1238,31 @@ $('#btn-video')?.addEventListener('click', async () => {
         if (rv) {
           rv.srcObject = stream;
           rv.muted = false;
-          rv.play().catch(() => {
-            // Autoplay was prevented, will play on user interaction
-          });
+          rv.playsInline = true;
+          // Force play with user interaction fallback
+          const playPromise = rv.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              document.addEventListener('click', function playVideo() {
+                rv.play();
+                document.removeEventListener('click', playVideo);
+              }, { once: true });
+            });
+          }
         }
         if (ra) {
           ra.srcObject = stream;
-          ra.play().catch(() => {
-            // Autoplay was prevented, will play on user interaction
-          });
+          ra.muted = false;
+          // Force play with user interaction fallback
+          const playPromise = ra.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              document.addEventListener('click', function playAudio() {
+                ra.play();
+                document.removeEventListener('click', playAudio);
+              }, { once: true });
+            });
+          }
         }
       },
       () => endVoice(),
@@ -1209,11 +1271,14 @@ $('#btn-video')?.addEventListener('click', async () => {
         if (lv) {
           lv.srcObject = local;
           lv.hidden = false;
+          lv.playsInline = true;
         }
       }
     );
-  } catch {
-    endVoice();
+  } catch (error) {
+    console.error('Video call error:', error);
+    setCallStatus('Failed');
+    setTimeout(endVoice, 2000);
   }
 });
 
@@ -1269,14 +1334,30 @@ $('#btn-call-accept')?.addEventListener('click', async () => {
         if (kind === 'video' && rv) {
           rv.srcObject = stream;
           rv.muted = false;
-          rv.play().catch(() => {
-            // Autoplay was prevented, will play on user interaction
-          });
+          rv.playsInline = true;
+          // Force play with user interaction fallback
+          const playPromise = rv.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              document.addEventListener('click', function playVideo() {
+                rv.play();
+                document.removeEventListener('click', playVideo);
+              }, { once: true });
+            });
+          }
         } else if (ra) {
           ra.srcObject = stream;
-          ra.play().catch(() => {
-            // Autoplay was prevented, will play on user interaction
-          });
+          ra.muted = false;
+          // Force play with user interaction fallback
+          const playPromise = ra.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {
+              document.addEventListener('click', function playAudio() {
+                ra.play();
+                document.removeEventListener('click', playAudio);
+              }, { once: true });
+            });
+          }
         }
       },
       () => endVoice(),
