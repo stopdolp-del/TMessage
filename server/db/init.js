@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS messages (
   FOREIGN KEY (sender_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS bannedUsers (
+  username TEXT PRIMARY KEY
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id);
 `;

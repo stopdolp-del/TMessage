@@ -47,6 +47,8 @@ module.exports = {
   setRuntimePort,
   jwtSecret: process.env.JWT_SECRET || 'dev-only-change-me',
   nodeEnv: process.env.NODE_ENV || 'development',
+  /** Admin usernames array */
+  admins: adminUsernames,
   /** Check if user is admin */
   isAdmin(username) {
     if (!username) return false;

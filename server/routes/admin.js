@@ -132,17 +132,26 @@ router.post('/unban', [
 // Get all messages
 router.get('/messages', (req, res) => {
   try {
-    console.log('[ADMIN] Getting messages with pagination:', req.query);
+    console.log('[ADMIN] Getting messages');
     const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // Cap at 500
-    const offset = Math.max(parseInt(req.query.offset) || 0, 0); // Ensure non-negative
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     
     const messages = db.prepare(`
       SELECT 
-        m.*,
-        u.username as sender_username
+        m.id,
+        m.body,
+        m.file_name,
+        m.created_at,
+        m.deleted,
+        m.chat_id,
+        u.id as sender_id,
+        u.username as sender_username,
+        c.name as chat_name,
+        c.type as chat_type
       FROM messages m
       JOIN users u ON m.sender_id = u.id
+      LEFT JOIN chats c ON m.chat_id = c.id
       ORDER BY m.created_at DESC
       LIMIT ? OFFSET ?
     `).all(limit, offset);
@@ -163,6 +172,136 @@ router.get('/messages', (req, res) => {
   } catch (error) {
     console.error('[ADMIN] Error getting messages:', error);
     res.status(500).json({ error: 'Failed to retrieve messages' });
+  }
+});
+
+// Delete user
+router.post('/deleteUser', [
+  body('username').trim().isLength({ min: 1 }).withMessage('Username is required')
+], (req, res) => {
+  try {
+    console.log('[ADMIN] Delete user request:', req.body);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    
+    const { username } = req.body;
+    const db = getDb();
+    
+    const user = db.prepare('SELECT id, username, is_admin FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+    if (!user) {
+      console.log('[ADMIN] User not found for deletion:', username);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (user.is_admin) {
+      console.log('[ADMIN] Attempt to delete admin:', user.username);
+      return res.status(400).json({ error: 'Cannot delete admin users' });
+    }
+    
+    if (user.id === req.user.id) {
+      return res.status(400).json({ error: 'Cannot delete yourself' });
+    }
+    
+    // Delete user (cascade will handle related records if foreign keys are set up)
+    db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    
+    console.log(`[ADMIN] ${req.user.username} deleted user: ${user.username}`);
+    
+    res.json({ 
+      success: true, 
+      message: `User ${user.username} deleted successfully`,
+      user: { id: user.id, username: user.username }
+    });
+  } catch (error) {
+    console.error('[ADMIN] Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Delete message
+router.post('/deleteMessage', [
+  body('messageId').isInt({ min: 1 }).withMessage('Valid message ID is required')
+], (req, res) => {
+  try {
+    console.log('[ADMIN] Delete message request:', req.body);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    
+    const { messageId } = req.body;
+    const db = getDb();
+    
+    const msg = db.prepare('SELECT id, chat_id, body FROM messages WHERE id = ?').get(messageId);
+    if (!msg) {
+      console.log('[ADMIN] Message not found:', messageId);
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    
+    // Soft delete the message
+    db.prepare('UPDATE messages SET deleted = 1 WHERE id = ?').run(messageId);
+    
+    // Broadcast deletion via WebSocket
+    broadcastToChat(msg.chat_id, { 
+      type: 'message_deleted', 
+      chatId: msg.chat_id, 
+      messageId: messageId 
+    }, null);
+    
+    console.log(`[ADMIN] ${req.user.username} deleted message: ${messageId}`);
+    
+    res.json({ 
+      success: true, 
+      message: `Message ${messageId} deleted successfully`,
+      messageId: messageId
+    });
+  } catch (error) {
+    console.error('[ADMIN] Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
+
+// Get banned users list
+router.get('/banned', (req, res) => {
+  try {
+    console.log('[ADMIN] Getting banned users');
+    const db = getDb();
+    const users = db.prepare(`
+      SELECT id, username, email, created_at, is_banned
+      FROM users 
+      WHERE is_banned = 1
+      ORDER BY created_at DESC
+    `).all();
+    console.log('[ADMIN] Retrieved banned users:', users.length);
+    res.json({ bannedUsers: users, count: users.length });
+  } catch (error) {
+    console.error('[ADMIN] Error getting banned users:', error);
+    res.status(500).json({ error: 'Failed to retrieve banned users' });
+  }
+});
+
+// Search users by username
+router.get('/searchUsers', (req, res) => {
+  try {
+    const query = (req.query.q || '').trim().toLowerCase();
+    console.log('[ADMIN] Search users:', query);
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Search query required' });
+    }
+    
+    const db = getDb();
+    const users = db.prepare(`
+      SELECT id, username, email, created_at, is_banned, is_admin, is_verified
+      FROM users 
+      WHERE LOWER(username) LIKE ?
+      ORDER BY created_at DESC
+      LIMIT 50
+    `).all(`%${query}%`);
+    
+    console.log('[ADMIN] Search results:', users.length);
+    res.json({ users, count: users.length });
+  } catch (error) {
+    console.error('[ADMIN] Error searching users:', error);
+    res.status(500).json({ error: 'Failed to search users' });
   }
 });
 

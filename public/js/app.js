@@ -236,7 +236,7 @@ async function refreshMe() {
   
   // Add admin badge if user is admin
   if (tu && user.is_admin) {
-    tu.innerHTML = `@${user.username} <span class="admin-badge admin">🛡️</span>`;
+    tu.innerHTML = `@${user.username} <span class="admin-badge admin">�</span>`;
   }
   
   $('#btn-admin')?.classList.toggle('hidden', !user.is_admin);
@@ -1718,8 +1718,10 @@ function renderAdminUsers() {
     item.className = 'admin-user-item';
     
     const badges = [];
-    if (user.is_admin) badges.push('<span class="admin-badge admin">🛡️ Admin</span>');
+    if (user.is_admin) badges.push('<span class="admin-badge admin">� Admin</span>');
     if (user.is_banned) badges.push('<span class="admin-badge banned">🚫 Banned</span>');
+    
+    const isCurrentUser = me?.username === user.username;
     
     item.innerHTML = `
       <div class="admin-user-info">
@@ -1729,22 +1731,28 @@ function renderAdminUsers() {
         </div>
       </div>
       <div class="admin-actions">
+        ${!user.is_admin && !user.is_banned ? 
+          `<button class="admin-btn ban" data-username="${user.username}">Ban</button>` : ''}
         ${user.is_banned ? 
-          `<button class="admin-btn unban" data-username="${user.username}">Unban</button>` :
-          `<button class="admin-btn ban" data-username="${user.username}">Ban</button>`
-        }
+          `<button class="admin-btn unban" data-username="${user.username}">Unban</button>` : ''}
+        ${!user.is_admin && !isCurrentUser ? 
+          `<button class="admin-btn delete" data-username="${user.username}">Delete</button>` : ''}
       </div>
     `;
     
     // Add event listeners
     const banBtn = item.querySelector('.ban');
     const unbanBtn = item.querySelector('.unban');
+    const deleteBtn = item.querySelector('.delete');
     
     if (banBtn) {
       banBtn.addEventListener('click', () => banUser(user.username));
     }
     if (unbanBtn) {
       unbanBtn.addEventListener('click', () => unbanUser(user.username));
+    }
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => deleteUser(user.username));
     }
     
     frag.appendChild(item);
@@ -1765,11 +1773,19 @@ function renderAdminMessages(pagination) {
     
     item.innerHTML = `
       <div class="admin-message-info">
-        <div class="admin-message-sender">${escapeHtml(msg.sender_username)}</div>
+        <div class="admin-message-sender">${escapeHtml(msg.sender_username || msg.username)} ${msg.chat_name ? `in ${escapeHtml(msg.chat_name)}` : ''}</div>
         <div class="admin-message-content">${escapeHtml(msg.body || (msg.file_name ? '📎 ' + msg.file_name : '📎 Attachment'))}</div>
         <div class="admin-message-time">${new Date(msg.created_at * 1000).toLocaleString()}</div>
       </div>
+      <div class="admin-actions">
+        <button class="admin-btn delete" data-message-id="${msg.id}">Delete</button>
+      </div>
     `;
+    
+    const deleteBtn = item.querySelector('.delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => deleteMessage(msg.id));
+    }
     
     frag.appendChild(item);
   });
@@ -1827,6 +1843,40 @@ async function unbanUser(username) {
   } catch (error) {
     console.error('Failed to unban user:', error);
     showToast(error.data?.error || 'Failed to unban user');
+  }
+}
+
+async function deleteUser(username) {
+  if (!confirm(`DELETE user "${username}" permanently? This cannot be undone!`)) return;
+  
+  try {
+    await api('/admin/deleteUser', {
+      method: 'POST',
+      body: JSON.stringify({ username })
+    });
+    showToast(`User "${username}" deleted`);
+    await loadAdminUsers();
+  } catch (error) {
+    console.error('Failed to delete user:', error);
+    showToast(error.data?.error || 'Failed to delete user');
+  }
+}
+
+async function deleteMessage(messageId) {
+  if (!confirm(`Delete message ${messageId}?`)) return;
+  
+  try {
+    await api('/admin/deleteMessage', {
+      method: 'POST',
+      body: JSON.stringify({ messageId })
+    });
+    showToast(`Message ${messageId} deleted`);
+    // Remove from local array and re-render
+    adminMessages = adminMessages.filter(m => m.id !== messageId);
+    renderAdminMessages({ total: adminMessages.length, hasMore: true });
+  } catch (error) {
+    console.error('Failed to delete message:', error);
+    showToast(error.data?.error || 'Failed to delete message');
   }
 }
 
